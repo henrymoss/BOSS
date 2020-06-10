@@ -1,0 +1,13 @@
+README.md
+setup.cfg
+setup.py
+boss/__init__.py
+boss.egg-info/PKG-INFO
+boss.egg-info/SOURCES.txt
+boss.egg-info/dependency_links.txt
+boss.egg-info/requires.txt
+boss.egg-info/top_level.txt
+boss/tests/__init__.py
+boss/tests/test_String_np.py
+boss/tests/test_String_numba.py
+boss/tests/test_Tree.py
