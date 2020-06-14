@@ -146,20 +146,15 @@ class numbaStringKernel(object):
         # following notation from Beck (2017)
 
         # Make D: a upper triangular matrix over decay powers.
-        # also 
 
-        power = np.ones((self.maxlen, self.maxlen))
-        tril = np.zeros((self.maxlen, self.maxlen))
-        i1, i2 = np.indices((self.maxlen, self.maxlen))
-        for k in range(self.maxlen - 1):
-            power[i2-k-1 == i1] = k
-            tril[i2-k-1 == i1] = 1.0
 
+        tril = np.tril(np.ones((self.maxlen,self.maxlen)))
+        power = [[0]*i+list(range(0,self.maxlen-i)) for i in range(1,self.maxlen)]+[[0]*self.maxlen]
+        power = np.array(power).reshape(self.maxlen,self.maxlen) + tril
+        tril = np.transpose(tril) - np.eye(self.maxlen)
         gaps = np.ones([self.maxlen, self.maxlen])*self._gap_decay
-
         D = (gaps * tril) ** power
         dD_dgap = ((gaps * tril) ** (power - 1.0)) * tril * power
-
         return D, dD_dgap
 
 # take some functions outside class to allow numba speed ups

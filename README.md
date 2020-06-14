@@ -1,7 +1,7 @@
 # BOSS Package
 
 This is a package for performing Bayesian Optimziation over String Spaces (BOSS)
-It accompanies Moss et al. 2020 and provides notebooks to recreate all the experiments.
+It accompanies REDACTED and provides notebooks to recreate all the experiments.
 
 The code is built upon the emukit Bayesian optimziation library. We recommend following their tutorials to get started (https://github.com/amzn/emukit/tree/master/notebooks)
 
