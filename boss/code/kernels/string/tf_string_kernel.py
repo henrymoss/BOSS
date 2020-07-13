@@ -225,91 +225,90 @@ class TFStringKernel(object):
         paddings = tf.constant([[0, 0], [0, 0],[0,len(self.alphabet)]])
         X1 = X1 - tf.pad(tf.expand_dims(X1[:,:,0], 2),paddings,"CONSTANT")
         X2 = X2 - tf.pad(tf.expand_dims(X2[:,:,0], 2),paddings,"CONSTANT")
-
         # store squared match coef
         match_sq = tf.square(tf_match_decay)
         # Make S: the similarity tensor of shape (# strings, #characters, # characters)
         S = tf.matmul( X1,tf.transpose(X2,perm=(0,2,1)))
 
-
         # Main loop, where Kp, Kpp values and gradients are calculated.
         Kp = []
-        Kp.append(tf.ones(shape=(X1.shape[0],self.maxlen, self.maxlen), dtype=tf.float64))
         dKp_dgap = []
         dKp_dmatch = []
+        Kp.append(tf.ones(shape=(X1.shape[0],self.maxlen, self.maxlen), dtype=tf.float64))
         dKp_dgap.append(tf.zeros(shape=(X1.shape[0],self.maxlen, self.maxlen),dtype=tf.float64))
         dKp_dmatch.append(tf.zeros(shape=(X1.shape[0],self.maxlen, self.maxlen),dtype=tf.float64))
 
-
-
         for i in range(len(tf_order_coefs)-1):
-            aux1 = tf.multiply(S, Kp[i])
-            aux2 = tf.reshape(aux1, tf.stack([X1.shape[0] * self.maxlen, self.maxlen]))
-            aux3 = tf.matmul(aux2, D)
-            aux4 = aux3 * match_sq
-            aux5 = tf.reshape(aux4, tf.stack([X1.shape[0], self.maxlen, self.maxlen]))
-            aux6 = tf.transpose(aux5, perm=[0, 2, 1])
-            aux7 = tf.reshape(aux6, tf.stack([X1.shape[0] * self.maxlen, self.maxlen]))
-            aux8 = tf.matmul(aux7, D)
-            aux9 = tf.reshape(aux8, tf.stack([X1.shape[0], self.maxlen, self.maxlen]))
+            # calc subkernels for each subsequence length
+            aux = tf.multiply(S, Kp[i])
+            aux1 = tf.reshape(aux, tf.stack([X1.shape[0] * self.maxlen, self.maxlen]))
+            aux2 = tf.matmul(aux1, D)
+            aux = aux2 * match_sq
+            aux = tf.reshape(aux, tf.stack([X1.shape[0], self.maxlen, self.maxlen]))
+            aux = tf.transpose(aux, perm=[0, 2, 1])
+            aux3 = tf.reshape(aux, tf.stack([X1.shape[0] * self.maxlen, self.maxlen]))
+            aux = tf.matmul(aux3, D)
+            aux = tf.reshape(aux, tf.stack([X1.shape[0], self.maxlen, self.maxlen]))
+            Kp.append(tf.transpose(aux, perm=[0, 2, 1]))
             
 
-            daux1_dgap = tf.multiply(S, dKp_dgap[i])
-            daux2_dgap = tf.reshape(daux1_dgap, tf.stack([X1.shape[0] *self.maxlen,self.maxlen]))
-            daux3_dgap = tf.matmul(daux2_dgap, D) + tf.matmul(aux2, dD_dgap)
-            daux4_dgap = daux3_dgap * match_sq
-            daux5_dgap = tf.reshape(daux4_dgap, tf.stack([X1.shape[0],self.maxlen,self.maxlen]))
-            daux6_dgap = tf.transpose(daux5_dgap, perm=[0, 2, 1])
-            daux7_dgap = tf.reshape(daux6_dgap, tf.stack([X1.shape[0] *self.maxlen,self.maxlen]))
-            daux8_dgap = tf.matmul(daux7_dgap, D) + tf.matmul(aux7, dD_dgap)
-            daux9_dgap = tf.reshape(daux8_dgap, tf.stack([X1.shape[0],self.maxlen,self.maxlen]))
+            aux = tf.multiply(S, dKp_dgap[i])
+            aux = tf.reshape(aux, tf.stack([X1.shape[0] *self.maxlen,self.maxlen]))
+            aux = tf.matmul(aux, D) + tf.matmul(aux1, dD_dgap)
+            aux = aux * match_sq
+            aux = tf.reshape(aux, tf.stack([X1.shape[0],self.maxlen,self.maxlen]))
+            aux = tf.transpose(aux, perm=[0, 2, 1])
+            aux = tf.reshape(aux, tf.stack([X1.shape[0] *self.maxlen,self.maxlen]))
+            aux = tf.matmul(aux, D) + tf.matmul(aux3, dD_dgap)
+            aux = tf.reshape(aux, tf.stack([X1.shape[0],self.maxlen,self.maxlen]))
+            dKp_dgap.append(tf.transpose(aux, perm=[0, 2, 1]))
             
 
-            daux1_dmatch = tf.multiply(S, dKp_dmatch[i])
-            daux2_dmatch = tf.reshape(daux1_dmatch, tf.stack([X1.shape[0] *self.maxlen,self.maxlen]))
-            daux3_dmatch = tf.matmul(daux2_dmatch, D)
-            daux4_dmatch = (daux3_dmatch * match_sq) + (2 * tf_match_decay * aux3)
-            daux5_dmatch = tf.reshape(daux4_dmatch, tf.stack([X1.shape[0],self.maxlen,self.maxlen]))
-            daux6_dmatch = tf.transpose(daux5_dmatch, perm=[0, 2, 1])
-            daux7_dmatch = tf.reshape(daux6_dmatch, tf.stack([X1.shape[0] *self.maxlen,self.maxlen]))
-            daux8_dmatch = tf.matmul(daux7_dmatch, D)
-            daux9_dmatch = tf.reshape(daux8_dmatch, tf.stack([X1.shape[0],self.maxlen,self.maxlen]))
-            
-            Kp.append(tf.transpose(aux9, perm=[0, 2, 1]))
-            dKp_dgap.append(tf.transpose(daux9_dgap, perm=[0, 2, 1]))
-            dKp_dmatch.append(tf.transpose(daux9_dmatch, perm=[0, 2, 1]))
+            aux = tf.multiply(S, dKp_dmatch[i])
+            aux = tf.reshape(aux, tf.stack([X1.shape[0] *self.maxlen,self.maxlen]))
+            aux = tf.matmul(aux, D)
+            aux = (aux * match_sq) + (2 * tf_match_decay * aux2)
+            aux = tf.reshape(aux, tf.stack([X1.shape[0],self.maxlen,self.maxlen]))
+            aux = tf.transpose(aux, perm=[0, 2, 1])
+            aux = tf.reshape(aux, tf.stack([X1.shape[0] *self.maxlen,self.maxlen]))
+            aux = tf.matmul(aux, D)
+            aux = tf.reshape(aux, tf.stack([X1.shape[0],self.maxlen,self.maxlen]))
+            dKp_dmatch.append(tf.transpose(aux, perm=[0, 2, 1]))
 
-        final_Kp = tf.stack(Kp)
-        final_dKp_dgap = tf.stack(dKp_dgap)
-        final_dKp_dmatch = tf.stack(dKp_dmatch)
+
+
+
+        Kp = tf.stack(Kp)
+        dKp_dgap = tf.stack(dKp_dgap)
+        dKp_dmatch = tf.stack(dKp_dmatch)
 
         # Final calculation. We gather all Kps and
         # multiply then by their coeficients.
 
         # get k
-        mul1 = tf.multiply(S, final_Kp)
-        sum1 = tf.reduce_sum(mul1, 2)
-        sum2 = tf.reduce_sum(sum1, 2, keepdims=True)
+        aux = tf.multiply(S, Kp)
+        aux = tf.reduce_sum(aux, 2)
+        sum2 = tf.reduce_sum(aux, 2, keepdims=True)
         Ki = tf.multiply(sum2, match_sq)
         Ki = tf.squeeze(Ki, [2])
         # reshape in case batch size 1
         k = tf.reshape(tf.squeeze(tf.matmul(tf.reshape(tf_order_coefs,(1,-1)), Ki)),(X1.shape[0],))
 
         # get gap decay grads
-        dmul1_dgap = tf.multiply(S, final_dKp_dgap)
-        dsum1_dgap = tf.reduce_sum(dmul1_dgap, 2)
-        dsum2_dgap = tf.reduce_sum(dsum1_dgap, 2, keepdims=True)
-        dKi_dgap = tf.multiply(dsum2_dgap, match_sq)
-        dKi_dgap = tf.squeeze(dKi_dgap, [2])
-        dk_dgap = tf.reshape(tf.squeeze(tf.matmul(tf.reshape(tf_order_coefs,(1,-1)), dKi_dgap)),(X1.shape[0],))
+        aux = tf.multiply(S, dKp_dgap)
+        aux = tf.reduce_sum(aux, 2)
+        aux = tf.reduce_sum(aux, 2, keepdims=True)
+        aux = tf.multiply(aux, match_sq)
+        aux = tf.squeeze(aux, [2])
+        dk_dgap = tf.reshape(tf.squeeze(tf.matmul(tf.reshape(tf_order_coefs,(1,-1)), aux)),(X1.shape[0],))
 
         # get match decay grads
-        dmul1_dmatch = tf.multiply(S, final_dKp_dmatch)
-        dsum1_dmatch = tf.reduce_sum(dmul1_dmatch, 2)
-        dsum2_dmatch = tf.reduce_sum(dsum1_dmatch, 2, keepdims=True)
-        dKi_dmatch = tf.multiply(dsum2_dmatch, match_sq) + (2 * tf_match_decay * sum2)
-        dKi_dmatch = tf.squeeze(dKi_dmatch, [2])
-        dk_dmatch = tf.reshape( tf.squeeze(tf.matmul(tf.reshape(tf_order_coefs,(1,-1)), dKi_dmatch)),(X1.shape[0],))
+        aux = tf.multiply(S, dKp_dmatch)
+        aux = tf.reduce_sum(aux, 2)
+        aux = tf.reduce_sum(aux, 2, keepdims=True)
+        aux = tf.multiply(aux, match_sq) + (2 * tf_match_decay * sum2)
+        aux = tf.squeeze(aux, [2])
+        dk_dmatch = tf.reshape( tf.squeeze(tf.matmul(tf.reshape(tf_order_coefs,(1,-1)), aux)),(X1.shape[0],))
 
         # get coefs grads
         dk_dcoefs = tf.transpose(Ki)

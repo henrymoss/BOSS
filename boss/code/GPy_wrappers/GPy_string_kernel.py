@@ -32,7 +32,7 @@ class StringKernel(Kern):
     X is a numpy array of size (n,1) where each element is a string with characters seperated by spaces
     """
     def __init__(self, gap_decay=1.0, match_decay=2.0, order_coefs=[1.0],
-                 alphabet = [], maxlen=0, active_dims=None, normalize = True, implementation = "numba"):
+                 alphabet = [], maxlen=0, active_dims=None, normalize = True, implementation = "numba",batch_size=1000):
         super(StringKernel, self).__init__(1, active_dims, 'sk')
         self._name = "sk"
         self.gap_decay = Param('Gap_decay', gap_decay,Logexp())
@@ -55,7 +55,7 @@ class StringKernel(Kern):
         elif implementation=="tensorflow":
             self.kernel = TFStringKernel(_gap_decay=gap_decay, _match_decay=match_decay,
                                      _order_coefs=list(order_coefs), alphabet = self.alphabet, 
-                                     maxlen=maxlen,normalize=normalize)
+                                     maxlen=maxlen,normalize=normalize,batch_size=batch_size)
         else:
             raise ValueError("Need to choose either numpy, numba or tensorflow for implementation")
     def K(self, X, X2):
