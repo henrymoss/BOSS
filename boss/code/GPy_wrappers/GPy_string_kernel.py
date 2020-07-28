@@ -4,7 +4,6 @@ import numpy as np
 import sys
 from paramz.transformations import Logexp
 from ..kernels.string.np_string_kernel import NPStringKernel
-from ..kernels.string.numba_string_kernel import numbaStringKernel
 from ..kernels.string.tf_string_kernel import TFStringKernel
 
 
@@ -24,15 +23,14 @@ class StringKernel(Kern):
 †
     We recommend normalize = True to allow meaningful comparrison of strings of different length
     
-    On CPU set implementation = "numba"
-    Also can use just "numpy" (order of magnitude slower than numba)
+    On CPU set implementation = "numpy'
     
     on GPU set implementation = "tensorflow" 
 
     X is a numpy array of size (n,1) where each element is a string with characters seperated by spaces
     """
     def __init__(self, gap_decay=1.0, match_decay=2.0, order_coefs=[1.0],
-                 alphabet = [], maxlen=0, active_dims=None, normalize = True, implementation = "numba",batch_size=1000):
+                 alphabet = [], maxlen=0, active_dims=None, normalize = True, implementation = "numpy",batch_size=1000):
         super(StringKernel, self).__init__(1, active_dims, 'sk')
         self._name = "sk"
         self.gap_decay = Param('Gap_decay', gap_decay,Logexp())
@@ -48,16 +46,12 @@ class StringKernel(Kern):
             self.kernel = NPStringKernel(_gap_decay=gap_decay, _match_decay=match_decay,
                                      _order_coefs=list(order_coefs), alphabet = self.alphabet, 
                                      maxlen=maxlen,normalize=normalize)
-        elif implementation=="numba":
-            self.kernel = numbaStringKernel(_gap_decay=gap_decay, _match_decay=match_decay,
-                                     _order_coefs=list(order_coefs), alphabet = self.alphabet, 
-                                     maxlen=maxlen,normalize=normalize)
         elif implementation=="tensorflow":
             self.kernel = TFStringKernel(_gap_decay=gap_decay, _match_decay=match_decay,
                                      _order_coefs=list(order_coefs), alphabet = self.alphabet, 
                                      maxlen=maxlen,normalize=normalize,batch_size=batch_size)
         else:
-            raise ValueError("Need to choose either numpy, numba or tensorflow for implementation")
+            raise ValueError("Need to choose either numpy or tensorflow for implementation")
     def K(self, X, X2):
         # calc the kernel for input X
         # also calc the gradients w.r.t kernel parameters
@@ -70,6 +64,17 @@ class StringKernel(Kern):
         self.gap_grads = gap_grads
         self.match_grads = match_grads
         self.coef_grads = coef_grads
+        return k
+
+    def K_no_grads(self, X, X2):
+        # calc the kernel for input X
+        # also calc the gradients w.r.t kernel parameters
+        # need to update the TF stored hyper-parameters
+        self.kernel._gap_decay = self.gap_decay[0]
+        self.kernel._match_decay = self.match_decay[0]
+        self.kernel._order_coefs = list(self.order_coefs.values)
+        #calc kernel and store grads
+        k = self.kernel.K_no_grads(X, X2)
         return k
 
     def Kdiag(self, X):

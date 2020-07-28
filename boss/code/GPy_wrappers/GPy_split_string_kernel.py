@@ -28,7 +28,7 @@ class SplitStringKernel(Kern):
 	"""
 
 	def __init__(self,gap_decay=1.0, match_decay=2.0, order_coefs=[1.0],
-		alphabet = [], maxlen=0, num_splits=1,normalize = True, implementation = "numba"):
+		alphabet = [], maxlen=0, num_splits=1,normalize = True, implementation = "numpy"):
 		super(SplitStringKernel, self).__init__(1,None, "sk")
 		self._name = "sk"
 		self.num_splits = num_splits
