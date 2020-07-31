@@ -80,7 +80,6 @@ class TFStringKernel(object):
                 X2 = tf.pad(X2, paddings, "CONSTANT",constant_values="PAD") 
             X2 = self.table.lookup(X2)
 
-
         # Make D: a upper triangular matrix over decay powers.
         tf_tril =  tf.linalg.band_part(tf.ones((self.maxlen,self.maxlen),dtype=tf.float64), -1, 0)
         power = [[0]*i+list(range(0,self.maxlen-i)) for i in range(1,self.maxlen)]+[[0]*self.maxlen]
@@ -90,7 +89,6 @@ class TFStringKernel(object):
         gaps = tf.fill([self.maxlen, self.maxlen], tf_gap_decay)
         D = tf.pow(gaps*tf_tril, tf_power)
         dD_dgap = tf.pow((tf_tril * gaps), (tf_power - 1.0)) * tf_tril * tf_power
-
 
         #if needed calculate the values needed for normalization
         if self.normalize:
@@ -121,6 +119,7 @@ class TFStringKernel(object):
             X2_batch_indicies = [t[1] for t in tuples_batch]
             # collect strings for this batch
             X_batch = tf.gather(X,X_batch_indicies,axis=0)
+
             X2_batch = tf.gather(X2,X2_batch_indicies,axis=0)
             result = self._k(X_batch, X2_batch,D,dD_dgap)
             # this bit is probably slow, should vectorize
@@ -225,11 +224,11 @@ class TFStringKernel(object):
         paddings = tf.constant([[0, 0], [0, 0],[0,len(self.alphabet)]])
         X1 = X1 - tf.pad(tf.expand_dims(X1[:,:,0], 2),paddings,"CONSTANT")
         X2 = X2 - tf.pad(tf.expand_dims(X2[:,:,0], 2),paddings,"CONSTANT")
+        
         # store squared match coef
         match_sq = tf.square(tf_match_decay)
         # Make S: the similarity tensor of shape (# strings, #characters, # characters)
         S = tf.matmul( X1,tf.transpose(X2,perm=(0,2,1)))
-
         # Main loop, where Kp, Kpp values and gradients are calculated.
         Kp = []
         dKp_dgap = []
@@ -274,8 +273,6 @@ class TFStringKernel(object):
             aux = tf.matmul(aux, D)
             aux = tf.reshape(aux, tf.stack([X1.shape[0],self.maxlen,self.maxlen]))
             dKp_dmatch.append(tf.transpose(aux, perm=[0, 2, 1]))
-
-
 
 
         Kp = tf.stack(Kp)

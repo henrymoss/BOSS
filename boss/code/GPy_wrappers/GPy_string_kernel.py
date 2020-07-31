@@ -66,16 +66,6 @@ class StringKernel(Kern):
         self.coef_grads = coef_grads
         return k
 
-    def K_no_grads(self, X, X2):
-        # calc the kernel for input X
-        # also calc the gradients w.r.t kernel parameters
-        # need to update the TF stored hyper-parameters
-        self.kernel._gap_decay = self.gap_decay[0]
-        self.kernel._match_decay = self.match_decay[0]
-        self.kernel._order_coefs = list(self.order_coefs.values)
-        #calc kernel and store grads
-        k = self.kernel.K_no_grads(X, X2)
-        return k
 
     def Kdiag(self, X):
         # Calc just the diagonal elements of a kernel matrix

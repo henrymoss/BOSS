@@ -11,7 +11,7 @@ class NPStringKernel(object):
 	"""
 
 	def __init__(self, _gap_decay=1.0, _match_decay=1.0,
-				  _order_coefs=[1.0], alphabet = [], maxlen=0,normalize=True,m=5):    
+				  _order_coefs=[1.0], alphabet = [], maxlen=0,normalize=True):    
 		self._gap_decay = _gap_decay
 		self._match_decay = _match_decay
 		self._order_coefs = _order_coefs
@@ -218,7 +218,8 @@ class NPStringKernel(object):
 		tril = np.tril(np.ones((self.maxlen,self.maxlen)))
 		power = [[0]*i+list(range(0,self.maxlen-i)) for i in range(1,self.maxlen)]+[[0]*self.maxlen]
 		power = np.array(power).reshape(self.maxlen,self.maxlen) + tril
-		tril = np.transpose(tril-np.tril(np.ones((self.maxlen,self.maxlen)),-len(self._order_coefs))) - np.eye(self.maxlen)
+		#tril = np.transpose(tril-np.tril(np.ones((self.maxlen,self.maxlen)),-len(self._order_coefs))) - np.eye(self.maxlen)
+		tril = np.transpose(tril) - np.eye(self.maxlen)
 		gaps = np.ones([self.maxlen, self.maxlen])*self._gap_decay
 		D = (gaps * tril) ** power
 		dD_dgap = ((gaps * tril) ** (power - 1.0)) * tril * power
