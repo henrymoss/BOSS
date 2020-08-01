@@ -111,6 +111,7 @@ class StringKernel(Kernel):
         num_batches = tf.math.ceil(tf.shape(indicies)[0]/self.batch_size)
         # iterate through batches
         for i in tf.range(tf.cast(tf.math.ceil(tf.shape(indicies)[0]/self.batch_size),dtype=tf.int32)):
+            print("batch {}".(i))
             indicies_batch = indicies[self.batch_size*i:self.batch_size*(i+1)]
             X_batch = tf.gather(X,indicies_batch[:,0],axis=0)
             X2_batch = tf.gather(X2,indicies_batch[:,1],axis=0)
