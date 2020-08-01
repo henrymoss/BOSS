@@ -63,6 +63,9 @@ class StringKernel(Kernel):
             return tf.reshape(self._diag_calculations(X),(-1,))
 
     def K(self, X, X2=None):
+        print("Python execution")   ## This Line only Prints during Python Execution
+        tf.print("Graph execution") ## This Line only Print during Graph Execution
+
         # check if symmetric (no provided X2), if so then only need to calc upper gram matrix 
         symmetric = True if (X2 is None) else False
         
