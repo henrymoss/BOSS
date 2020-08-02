@@ -87,6 +87,7 @@ class TFStringKernel(object):
         tf_tril = tf.transpose(tf_tril)-tf.eye(self.maxlen,dtype=tf.float64)
         tf_gap_decay = tf.constant(self._gap_decay,dtype=tf.float64)
         gaps = tf.fill([self.maxlen, self.maxlen], tf_gap_decay)
+        
         D = tf.pow(gaps*tf_tril, tf_power)
         dD_dgap = tf.pow((tf_tril * gaps), (tf_power - 1.0)) * tf_tril * tf_power
 
@@ -95,7 +96,6 @@ class TFStringKernel(object):
             X_diag_Ks, X_diag_gap_grads, X_diag_match_grads, X_diag_coef_grads = self._diag_calculations(X)
             if not symmetric:
                 X2_diag_Ks, X2_diag_gap_grads, X2_diag_match_grads, X2_diag_coef_grads = self._diag_calculations(X2)
-            
 
         # Initialize return values
         k_results = np.zeros(shape=(len(X), len(X2)))
@@ -326,13 +326,13 @@ class TFStringKernel(object):
         diff_gap = ((diag_gap_grads_i * diag_Ks_j) +
                        (diag_Ks_i * diag_gap_grads_j))
         diff_gap /= 2 * norm
+
         gap_grads_norm = ((gap_grads / sqrt_norm) -
                         (K_norm * diff_gap))
         
         diff_match = ((diag_match_grads_i * diag_Ks_j) +
                        (diag_Ks_i * diag_match_grads_j))
         diff_match /= 2 * norm
-
         match_grads_norm = ((match_grads / sqrt_norm) -
                         (K_norm * diff_match))
         
