@@ -26,7 +26,7 @@ class StringKernel(Kernel):
         super().__init__()
         # constrain kernel params to between 0 and 1
         logistic_gap = tfb.Chain([tfb.AffineScalar(shift=tf.cast(0,tf.float64),scale=tf.cast(1,tf.float64)),tfb.Sigmoid()])
-        logisitc_match = tfb.Chain([tfb.AffineScalar(shift=tf.cast(0,tf.float64),scale=tf.cast(2,tf.float64)),tfb.Sigmoid()])
+        logisitc_match = tfb.Chain([tfb.AffineScalar(shift=tf.cast(0,tf.float64),scale=tf.cast(1,tf.float64)),tfb.Sigmoid()])
         self.gap_decay = Parameter(gap_decay, transform=logistic_gap,name="gap_decay")
         self.match_decay = Parameter(match_decay, transform=logisitc_match,name="match_decay")
 
