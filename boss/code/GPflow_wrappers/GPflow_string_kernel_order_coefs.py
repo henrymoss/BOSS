@@ -8,6 +8,7 @@ from tensorflow_probability import bijectors as tfb
 class StringKernel(Kernel):
     """
     Code to run the SSK of Moss et al. 2020 with gpflow
+    For additional infomration on SSKs see Beck et al 2017.
     
    with hyperparameters:
     1) match_decay float
@@ -20,15 +21,22 @@ class StringKernel(Kernel):
         longest non-contiguous occurences of subsequences considered (max_occurence_length > max_subsequence_length)
     We calculate gradients for match_decay and gap_decay w.r.t kernel hyperparameters following Beck (2017)
     We recommend normalize = True to allow meaningful comparrison of strings of different length
+    
+    Functions with the _grads suffix also calculate the gradeint of the kernel w.r.t kernel parameters and are used when training the model
+    Functions without the _grads suffix are for making predictions and are called by gpflow
+
+
     """
     def __init__(self, gap_decay=0.1, match_decay=0.9, max_subsequence_length=3,max_occurence_length=10,
                  alphabet = [], maxlen=0, normalize = True,batch_size=1000):
         super().__init__()
         # constrain kernel params to between 0 and 1
         logistic_gap = tfb.Chain([tfb.AffineScalar(shift=tf.cast(0,tf.float64),scale=tf.cast(1,tf.float64)),tfb.Sigmoid()])
-        logisitc_match = tfb.Chain([tfb.AffineScalar(shift=tf.cast(0,tf.float64),scale=tf.cast(2,tf.float64)),tfb.Sigmoid()])
+        logisitc_match = tfb.Chain([tfb.AffineScalar(shift=tf.cast(0,tf.float64),scale=tf.cast(1,tf.float64)),tfb.Sigmoid()])
         self.gap_decay = Parameter(gap_decay, transform=logistic_gap,name="gap_decay")
         self.match_decay = Parameter(match_decay, transform=logisitc_match,name="match_decay")
+        self.order_coefs = Parameter([1]*max_subsequence_length, transform=positive(),name="order_coefs")
+
 
         self.max_subsequence_length = max_subsequence_length
         self.max_occurence_length = max_occurence_length
@@ -80,9 +88,7 @@ class StringKernel(Kernel):
         # first split up strings and pad to fixed length and prep for gpu
         # pad until all have length of self.maxlen
         X = tf.strings.split(tf.squeeze(X,1)).to_tensor("PAD",shape=[None,self.maxlen])
-        print(X)
         X = self.table.lookup(X)
-        print(X)
         if symmetric:
             X2 = X
         else:
@@ -213,8 +219,9 @@ class StringKernel(Kernel):
         aux = tf.reduce_sum(aux, 2, keepdims=True)
         Ki = tf.multiply(aux, match_sq)
         Ki = tf.squeeze(Ki, [2])
-        Ki = tf.expand_dims(Ki, 0)
-        return tf.transpose(tf.reduce_sum(Ki,1))
+        k = tf.linalg.matvec(tf.transpose(Ki),self.order_coefs)
+        k = tf.expand_dims(k, 1)
+        return k
 
 
     def _precalc(self):
@@ -235,28 +242,9 @@ class StringKernel(Kernel):
 
 
 
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
+    ################################
+    # code for getting kernel params
+    ################################
 
 
 
@@ -291,11 +279,11 @@ class StringKernel(Kernel):
 
         # if needed pre calculate the values for kernel normalization
         if self.normalize:
-            X_diag_Ks, X_diag_gap_grads, X_diag_match_grads = tf.squeeze(self._diag_calculations_grads(X))
+            X_diag_Ks, X_diag_gap_grads, X_diag_match_grads, X_diag_coef_grads  = self._diag_calculations_grads(X)
             if not symmetric:
-                X2_diag_Ks, X2_diag_gap_grads, X2_diag_match_grads = tf.squeeze(self._diag_calculations_grads(X2))
+                X2_diag_Ks, X2_diag_gap_grads, X2_diag_match_grads, X2_diag_coef_grads = self._diag_calculations_grads(X2)
             else:
-                X2_diag_Ks, X2_diag_gap_grads, X2_diag_match_grads = X_diag_Ks, X_diag_gap_grads, X_diag_match_grads          
+                X2_diag_Ks, X2_diag_gap_grads, X2_diag_match_grads, X2_diag_coef_grads  = X_diag_Ks, X_diag_gap_grads, X_diag_match_grads, X_diag_coef_grads          
 
 
         # get indicies of all possible pairings from X and X2
@@ -309,6 +297,7 @@ class StringKernel(Kernel):
         k_results = tf.TensorArray(tf.float64, size=0, dynamic_size=True,infer_shape=False)
         gap_grads = tf.TensorArray(tf.float64, size=0, dynamic_size=True,infer_shape=False)
         match_grads = tf.TensorArray(tf.float64, size=0, dynamic_size=True,infer_shape=False)
+        coef_grads = tf.TensorArray(tf.float64, size=0, dynamic_size=True,infer_shape=False)
 
         num_batches = tf.math.ceil(tf.shape(indicies)[0]/self.batch_size)
         # iterate through batches
@@ -320,36 +309,44 @@ class StringKernel(Kernel):
             k_results = k_results.write(k_results.size(), results[0])
             gap_grads = gap_grads.write(gap_grads.size(),results[1])
             match_grads = match_grads.write(match_grads.size(),results[2])
+            coef_grads = coef_grads.write(coef_grads.size(),results[3])
 
         # combine indivual kernel results
         k_results = tf.reshape(k_results.concat(),[1,-1])
         gap_grads = tf.reshape(gap_grads.concat(),[1,-1])
         match_grads = tf.reshape(match_grads.concat(),[1,-1])
+        coef_grads = coef_grads.concat()
 
-
-        # put results into the right places in the gram matrix
-        # if symmetric then only put in top triangle (inc diag)
+        # put results into the right places in the gram matrix (and gradient matricies)
         if symmetric:
+            # if symmetric then only put in top triangle (inc diag)
             mask = tf.linalg.band_part(tf.ones((tf.shape(X)[0],tf.shape(X)[0]),dtype=tf.int64), 0, -1)
             non_zero = tf.not_equal(mask, tf.constant(0, dtype=tf.int64))
             indices = tf.where(non_zero) # Extracting the indices of upper triangle elements
-            out = tf.SparseTensor(indices,tf.squeeze(k_results),dense_shape=tf.cast((tf.shape(X)[0],tf.shape(X)[0]),dtype=tf.int64))
-            k_results = tf.sparse.to_dense(out)
-            out = tf.SparseTensor(indices,tf.squeeze(gap_grads),dense_shape=tf.cast((tf.shape(X)[0],tf.shape(X)[0]),dtype=tf.int64))
-            gap_grads = tf.sparse.to_dense(out)
-            out = tf.SparseTensor(indices,tf.squeeze(match_grads),dense_shape=tf.cast((tf.shape(X)[0],tf.shape(X)[0]),dtype=tf.int64))
-            match_grads = tf.sparse.to_dense(out)
+            # put results in place
+            k_results = tf.scatter_nd(indicies,tf.squeeze(k_results),(tf.shape(X)[0],tf.shape(X)[0]))
+            gap_grads = tf.scatter_nd(indicies,tf.squeeze(gap_grads),(tf.shape(X)[0],tf.shape(X)[0]))
+            match_grads = tf.scatter_nd(indicies,tf.squeeze(match_grads),(tf.shape(X)[0],tf.shape(X)[0]))
 
-            #add in mising elements
+            # extend indicies for coef_grads
+            indicies_sequence_length = tf.reshape(tf.repeat(tf.range(self.max_subsequence_length),tf.shape(indicies)[0]),(-1,1))
+            indicies = tf.concat([tf.tile(indicies,(self.max_subsequence_length,1)),indicies_sequence_length],axis=1)
+            coef_grads = tf.reshape(tf.transpose(coef_grads),[1,-1])
+            coef_grads = tf.scatter_nd(indicies,tf.squeeze(coef_grads),(tf.shape(X)[0],tf.shape(X)[0],self.max_subsequence_length))
+            
+            #add in mising (lower diagonal) elements by adding transpose and removing diagonal terms that are counted twice
             k_results = k_results + tf.linalg.set_diag(tf.transpose(k_results),tf.zeros(tf.shape(X)[0],dtype=tf.float64))
             gap_grads = gap_grads + tf.linalg.set_diag(tf.transpose(gap_grads),tf.zeros(tf.shape(X)[0],dtype=tf.float64))
             match_grads = match_grads + tf.linalg.set_diag(tf.transpose(match_grads),tf.zeros(tf.shape(X)[0],dtype=tf.float64))
+            coef_grads = coef_grads + tf.transpose(coef_grads,[1,0,2]) - tf.transpose(tf.linalg.diag(tf.linalg.diag_part(tf.transpose(coef_grads,[2,0,1]))),(1,2,0))
         else:
+            # else fill in whole matricies
             k_results = tf.reshape(k_results,[tf.shape(X)[0],tf.shape(X2)[0]])
             gap_grads = tf.reshape(gap_grads,[tf.shape(X)[0],tf.shape(X2)[0]])
             match_grads = tf.reshape(match_grads,[tf.shape(X)[0],tf.shape(X2)[0]])
+            coef_grads = tf.reshape(coef_grads,[tf.shape(X)[0],tf.shape(X2)[0],self.max_subsequence_length])
 
-        # normalize if required
+        # normalize if required 
         if self.normalize:
             # norm for kern
             norm = tf.tensordot(X_diag_Ks, X2_diag_Ks,axes=0)
@@ -358,9 +355,13 @@ class StringKernel(Kernel):
             # norm for gap and match grads
             diff_gap = tf.divide(tf.tensordot(X_diag_gap_grads,X2_diag_Ks,axes=0) + tf.tensordot(X_diag_Ks,X2_diag_gap_grads,axes=0),2 * norm)
             diff_match = tf.divide(tf.tensordot(X_diag_match_grads,X2_diag_Ks,axes=0) + tf.tensordot(X_diag_Ks,X2_diag_match_grads,axes=0),2 * norm)
+            diff_coefs = tf.tensordot(tf.transpose(X_diag_coef_grads),X2_diag_Ks,axes=0) + tf.transpose(tf.tensordot(tf.transpose(X2_diag_coef_grads),X_diag_Ks,axes=0),(0,2,1))
+            diff_coefs = tf.divide(diff_coefs,2 * tf.expand_dims(norm,0))
+
             gap_grads= tf.divide(gap_grads, tf.sqrt(norm)) - tf.multiply(k_results,diff_gap)
             match_grads = tf.divide(match_grads, tf.sqrt(norm)) - tf.multiply(k_results,diff_match)
-        return k_results, gap_grads, match_grads
+            coef_grads = tf.divide(coef_grads, tf.sqrt(tf.expand_dims(norm,-1))) - tf.transpose(tf.multiply(tf.expand_dims(k_results,0),diff_coefs),[1,2,0])
+        return k_results, gap_grads, match_grads, coef_grads
 
 
 
@@ -377,6 +378,7 @@ class StringKernel(Kernel):
             k_results = tf.TensorArray(tf.float64, size=0, dynamic_size=True,infer_shape=False)
             gap_grads = tf.TensorArray(tf.float64, size=0, dynamic_size=True,infer_shape=False)
             match_grads = tf.TensorArray(tf.float64, size=0, dynamic_size=True,infer_shape=False)
+            coef_grads = tf.TensorArray(tf.float64, size=0, dynamic_size=True,infer_shape=False)
             
             num_batches = tf.math.ceil(tf.shape(X)[0]/self.batch_size)
             # iterate through batches
@@ -386,12 +388,14 @@ class StringKernel(Kernel):
                 k_results = k_results.write(k_results.size(), results[0])
                 gap_grads = gap_grads.write(gap_grads.size(),results[1])
                 match_grads = match_grads.write(match_grads.size(),results[2])
+                coef_grads = coef_grads.write(coef_grads.size(),results[3])
 
             # collect all batches
-            k_results = tf.reshape(k_results.concat(),[1,-1])
-            gap_grads = tf.reshape(gap_grads.concat(),[1,-1])
-            match_grads = tf.reshape(match_grads.concat(),[1,-1])
-            return (k_results, gap_grads, match_grads)
+            k_results = tf.reshape(k_results.concat(),(-1))
+            gap_grads = tf.reshape(gap_grads.concat(),(-1))
+            match_grads = tf.reshape(match_grads.concat(),(-1))
+            coef_grads = coef_grads.concat()
+            return (k_results, gap_grads, match_grads, coef_grads)
 
 
 
@@ -497,8 +501,8 @@ class StringKernel(Kernel):
         sum2 = tf.reduce_sum(aux, 2, keepdims=True)
         Ki = tf.multiply(sum2, match_sq)
         Ki = tf.squeeze(Ki, [2])
-        Ki = tf.expand_dims(Ki, 0)
-        k = tf.transpose(tf.reduce_sum(Ki,1))
+        k = tf.linalg.matvec(tf.transpose(Ki),self.order_coefs)
+        k = tf.expand_dims(k, 1)
 
         # get gap decay grads
         aux = tf.multiply(S, dKp_dgap)
@@ -506,8 +510,9 @@ class StringKernel(Kernel):
         aux = tf.reduce_sum(aux, 2, keepdims=True)
         aux = tf.multiply(aux, match_sq)
         aux = tf.squeeze(aux, [2])
-        aux = tf.expand_dims(aux, 0)
-        dk_dgap = tf.transpose(tf.reduce_sum(aux,1))
+        dk_dgap = tf.linalg.matvec(tf.transpose(aux),self.order_coefs)
+        dk_dgap = tf.expand_dims(dk_dgap, 1)
+
 
         # get match decay grads
         aux = tf.multiply(S, dKp_dmatch)
@@ -515,10 +520,13 @@ class StringKernel(Kernel):
         aux = tf.reduce_sum(aux, 2, keepdims=True)
         aux = tf.multiply(aux, match_sq) + (2 * self.match_decay * sum2)
         aux = tf.squeeze(aux, [2])
-        aux = tf.expand_dims(aux, 0)
-        dk_dmatch = tf.transpose(tf.reduce_sum(aux,1))
+        dk_dmatch = tf.linalg.matvec(tf.transpose(aux),self.order_coefs)
+        dk_dmatch = tf.expand_dims(dk_dmatch, 1)
 
-        return k, dk_dgap, dk_dmatch
+        #get coef grads
+        dk_dcoefs = tf.transpose(Ki)
+
+        return k, dk_dgap, dk_dmatch, dk_dcoefs
 
 
 
