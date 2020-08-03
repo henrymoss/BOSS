@@ -80,9 +80,7 @@ class StringKernel(Kernel):
         # first split up strings and pad to fixed length and prep for gpu
         # pad until all have length of self.maxlen
         X = tf.strings.split(tf.squeeze(X,1)).to_tensor("PAD",shape=[None,self.maxlen])
-        print(X)
         X = self.table.lookup(X)
-        print(X)
         if symmetric:
             X2 = X
         else:
