@@ -21,9 +21,9 @@ class StringKernel(Kernel):
     We calculate gradients for match_decay and gap_decay w.r.t kernel hyperparameters following Beck (2017)
     We recommend normalize = True to allow meaningful comparrison of strings of different length
     """
-    def __init__(self, gap_decay=0.1, match_decay=0.9, max_subsequence_length=3,max_occurence_length=10,
+    def __init__(self, active_dims=[0],gap_decay=0.1, match_decay=0.9, max_subsequence_length=3,max_occurence_length=10,
                  alphabet = [], maxlen=0, normalize = True,batch_size=1000):
-        super().__init__()
+        super().__init__(active_dims=[0])
         # constrain kernel params to between 0 and 1
         logistic_gap = tfb.Chain([tfb.AffineScalar(shift=tf.cast(0,tf.float64),scale=tf.cast(1,tf.float64)),tfb.Sigmoid()])
         logisitc_match = tfb.Chain([tfb.AffineScalar(shift=tf.cast(0,tf.float64),scale=tf.cast(1,tf.float64)),tfb.Sigmoid()])
