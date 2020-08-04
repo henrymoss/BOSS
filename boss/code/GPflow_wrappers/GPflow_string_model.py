@@ -91,6 +91,7 @@ class StringGPR(GPModel, InternalDataTrainingLossMixin):
                     loss = -self.log_marginal_likelihood(next(batches))
             grads = tape.gradient(loss, self.trainable_variables)
             optimizer.apply_gradients(zip(grads, self.trainable_variables))
+            tf.print(f"Step {step} has batch log likelihood of {-loss}")
             tf.print(f"Model params are {[p.numpy() for p in self.parameters]}")
 
 
