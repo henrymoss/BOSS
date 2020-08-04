@@ -45,10 +45,6 @@ class StringKernel(Kernel):
 
 
 
-
-
-
-
     def K_diag(self, X):
         r"""
         Calc just the diagonal elements of a kernel matrix
@@ -109,8 +105,11 @@ class StringKernel(Kernel):
         Calc the elements of a kernel matrix 
         """
         # check if symmetric (no provided X2), if so then only need to calc upper gram matrix 
-        if tf.reduce_min(tf.cast(tf.math.equal(X,X2),dtype=tf.int32))==0:
-            symmetric = True 
+        if X.shape == X2.shape:
+            if tf.reduce_min(tf.cast(tf.math.equal(X,X2),dtype=tf.int32))==0:
+                symmetric = True 
+            else:
+                symmetric = False
         else:
             symmetric = False
         
