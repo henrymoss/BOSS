@@ -85,11 +85,11 @@ class StringKernel(Kernel):
         Another wrapper to allow manual specification of kernel gradients
         """
         # collect kernel (first without gradients)
-        k_results = self.K_calc(X, X2)
+        k_results = tf.stop_gradient(self.K_calc(X, X2))
 
         # if gradients required then hardcode the kernel gradients to avoid autodiff using exponential memory useage
         def grad(dy, variables=None):
-            _, gap_grads, match_grads = self.K_calc_grads(X,X2)
+            _, gap_grads, match_grads = tf.stop_gradient(self.K_calc_grads(X,X2))
             return [tf.reduce_sum(tf.multiply(dy,gap_grads)) , tf.reduce_sum(tf.multiply(dy,match_grads))] ,[tf.reduce_sum(tf.multiply(dy,gap_grads)) , tf.reduce_sum(tf.multiply(dy,match_grads))]    
         return k_results, grad
 
@@ -239,7 +239,6 @@ class StringKernel(Kernel):
     
 
 
-
     def _k(self, X1, X2, D):
         r"""
         Vectorized kernel calc.
@@ -278,10 +277,12 @@ class StringKernel(Kernel):
 
            
         # Final calculation. We gather all Kps 
-        Kp = Kp.stack()
+        Kp_stacked = Kp.stack()
+        Kp.close()
+
 
         # Get k
-        aux = tf.multiply(S, Kp)
+        aux = tf.multiply(S, Kp_stacked)
         aux = tf.reduce_sum(aux, 2)
         sum2 = tf.reduce_sum(aux, 2, keepdims=True)
         Ki = tf.multiply(sum2, match_sq)
@@ -403,8 +404,7 @@ class StringKernel(Kernel):
             diff_match = tf.divide(tf.tensordot(X_diag_match_grads,X2_diag_Ks,axes=0) + tf.tensordot(X_diag_Ks,X2_diag_match_grads,axes=0),2 * norm)
             gap_grads= tf.divide(gap_grads, tf.sqrt(norm)) - tf.multiply(k_results,diff_gap)
             match_grads = tf.divide(match_grads, tf.sqrt(norm)) - tf.multiply(k_results,diff_match)
-        
-
+    
         return k_results, gap_grads, match_grads
 
 
@@ -460,8 +460,6 @@ class StringKernel(Kernel):
         dD_dgap = tf.pow((tf_tril * gaps), (tf_power - 1.0)) * tf_tril * tf_power
         return D, dD_dgap
     
-
-
 
     def _k_grads(self, X1, X2, D, dD_dgap):
         r"""
@@ -528,13 +526,16 @@ class StringKernel(Kernel):
 
            
         # Final calculation. We gather all Kps 
-        Kp = Kp.stack()
-        dKp_dgap = dKp_dgap.stack()
-        dKp_dmatch = dKp_dmatch.stack()
+        Kp_stacked = Kp.stack()
+        Kp.close()
+        dKp_dgap_stacked = dKp_dgap.stack()
+        dKp_dgap.close()
+        dKp_dmatch_stacked = dKp_dmatch.stack()
+        dKp_dmatch.close()
 
 
         # Get k
-        aux = tf.multiply(S, Kp)
+        aux = tf.multiply(S, Kp_stacked)
         aux = tf.reduce_sum(aux, 2)
         sum2 = tf.reduce_sum(aux, 2, keepdims=True)
         Ki = tf.multiply(sum2, match_sq)
@@ -543,7 +544,7 @@ class StringKernel(Kernel):
         k = tf.transpose(tf.reduce_sum(Ki,1))
 
         # get gap decay grads
-        aux = tf.multiply(S, dKp_dgap)
+        aux = tf.multiply(S, dKp_dgap_stacked)
         aux = tf.reduce_sum(aux, 2)
         aux = tf.reduce_sum(aux, 2, keepdims=True)
         aux = tf.multiply(aux, match_sq)
@@ -552,7 +553,7 @@ class StringKernel(Kernel):
         dk_dgap = tf.transpose(tf.reduce_sum(aux,1))
 
         # get match decay grads
-        aux = tf.multiply(S, dKp_dmatch)
+        aux = tf.multiply(S, dKp_dmatch_stacked)
         aux = tf.reduce_sum(aux, 2)
         aux = tf.reduce_sum(aux, 2, keepdims=True)
         aux = tf.multiply(aux, match_sq) + (2 * self.match_decay * sum2)
@@ -561,6 +562,9 @@ class StringKernel(Kernel):
         dk_dmatch = tf.transpose(tf.reduce_sum(aux,1))
 
         return k, dk_dgap, dk_dmatch
+
+
+
 
 
 
