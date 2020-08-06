@@ -108,6 +108,7 @@ class StringKernel(Kernel):
             self.symmetric = True
             k_results = self.K_calc(X,X)
         else:
+            self.symmetric = False
             k_results = self.K_calc(X,X2)
 
         return k_results
