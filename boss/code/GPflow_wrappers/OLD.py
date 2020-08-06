@@ -6,6 +6,14 @@ import numpy as np
 from tensorflow_probability import bijectors as tfb
 
 
+
+
+
+
+
+
+
+
 class OLDStringKernel(Kernel):
     """
     Code to run the SSK of Moss et al. 2020 with gpflow
@@ -26,16 +34,18 @@ class OLDStringKernel(Kernel):
                  alphabet = [], maxlen=0, normalize = True,batch_size=1000):
         super().__init__()
         # constrain kernel params to between 0 and 1
-        logistic_gap = tfb.Chain([tfb.AffineScalar(shift=tf.cast(0,tf.float64),scale=tf.cast(1,tf.float64)),tfb.Sigmoid()])
+        logistic_gap = tfb.Chain([tfb.Shift(tf.cast(0,tf.float64))(tfb.Scale(tf.cast(1,tf.float64))),tfb.Sigmoid()])
         logisitc_match = tfb.Chain([tfb.AffineScalar(shift=tf.cast(0,tf.float64),scale=tf.cast(1,tf.float64)),tfb.Sigmoid()])
         self.gap_decay = Parameter(gap_decay, transform=logistic_gap,name="gap_decay")
         self.match_decay = Parameter(match_decay, transform=logisitc_match,name="match_decay")
 
-        self.max_subsequence_length = max_subsequence_length
-        self.max_occurence_length = max_occurence_length
-        self.alphabet = alphabet
-        self.maxlen = maxlen
-        self.normalize = normalize
+
+
+        self.max_subsequence_length = tf.constant(max_subsequence_length)
+        self.max_occurence_length = tf.constant(max_occurence_length)
+        self.alphabet = tf.constant(alphabet)
+        self.maxlen = tf.constant(maxlen)
+        self.normalize = tf.constant(normalize)
         self.batch_size = batch_size
 
         # build a lookup table of the alphabet to encode input strings
@@ -44,6 +54,9 @@ class OLDStringKernel(Kernel):
                 keys=tf.constant(["PAD"]+alphabet),
                 values=tf.constant(range(0,len(alphabet)+1)),),default_value=0)
 
+        # initilaize D to fill in later when required
+        self.D=None
+
 
 
     def K_diag(self, X):
@@ -51,6 +64,8 @@ class OLDStringKernel(Kernel):
         # check if string is not longer than max length
         # if  tf.reduce_max(tf.strings.length(X)) + 1 > 2 * self.maxlen:
         #             raise ValueError("An input string is longer that max-length so refit the kernel with a larger maxlen param")
+        
+
         if self.normalize:
             # if normalizing then diagonal will just be ones
             return tf.cast(tf.fill(tf.shape(X)[:-1],1),tf.float64)
@@ -62,17 +77,27 @@ class OLDStringKernel(Kernel):
             X = tf.strings.split(tf.squeeze(X,1)).to_tensor("PAD",shape=[None,self.maxlen])
             X = self.table.lookup(X)
             return tf.reshape(self._diag_calculations(X),(-1,))
+    
 
-    def K(self, X, X2=None):
-        # check if symmetric (no provided X2), if so then only need to calc upper gram matrix 
-        symmetric = True if (X2 is None) else False
 
+
+
+
+
+
+
+    def K(self, X,X2=None):
+
+
+
+        #check if symmetric (no provided X2), if so then only need to calc upper gram matrix 
+        symmetric = tf.cond(tf.constant(tf.is_tensor(X2)),lambda: tf.constant(False),lambda: tf.constant(True))
         # check if input strings are longer than max allowed length
-        # if  tf.reduce_max(tf.strings.length(X)) + 1 > 2 * self.maxlen:
-        #             raise ValueError("An input string is longer that max-length so refit the kernel with a larger maxlen param")
-        # if not symmetric:
-        #     if  tf.reduce_max(tf.strings.length(X2)) + 1 > 2 * self.maxlen:
-        #             raise ValueError("An input string is longer that max-length so refit the kernel with a larger maxlen param")        
+        if  tf.reduce_max(tf.strings.length(X)) + 1 > 2 * self.maxlen:
+            raise ValueError("An input string is longer that max-length so refit the kernel with a larger maxlen param")
+        if not symmetric:
+            if  tf.reduce_max(tf.strings.length(X2)) + 1 > 2 * self.maxlen:
+                raise ValueError("An input string is longer that max-length so refit the kernel with a larger maxlen param")        
 
 
         # Turn our inputs into lists of integers using one-hot embedding
@@ -88,13 +113,15 @@ class OLDStringKernel(Kernel):
             X2 = self.table.lookup(X2)
 
         # get the decay tensor D
-        D = self._precalc()
+        self._precalc()
 
         # if needed pre calculate the values for kernel normalization
-        if self.normalize:
-            X_diag_Ks = tf.squeeze(self._diag_calculations(X))
+        if self.normalize and not symmetric:
+            X_diag_Ks = self._diag_calculations(X)
             if not symmetric:
-                X2_diag_Ks = tf.squeeze(self._diag_calculations(X2))
+                X2_diag_Ks = self._diag_calculations(X2)
+            else:
+                X2_diags_Ks = X_diag_Ks
 
 
         # get indicies of all possible pairings from X and X2
@@ -106,14 +133,17 @@ class OLDStringKernel(Kernel):
             indicies = tf.boolean_mask(indicies,tf.greater_equal(indicies[:,1],indicies[:,0]))
         # make kernel calcs in batches
         k_results = tf.TensorArray(tf.float64, size=0, dynamic_size=True,infer_shape=False)
-        num_batches = tf.math.ceil(tf.shape(indicies)[0]/self.batch_size)
+        
         # iterate through batches
-        for i in tf.range(tf.cast(tf.math.ceil(tf.shape(indicies)[0]/self.batch_size),dtype=tf.int32)):
+        num_batches = tf.cast(tf.math.ceil(tf.shape(indicies)[0]/self.batch_size),dtype=tf.int64)
+    
+        for i in tf.range(num_batches):
+     
             indicies_batch = indicies[self.batch_size*i:self.batch_size*(i+1)]
             X_batch = tf.gather(X,indicies_batch[:,0],axis=0)
             X2_batch = tf.gather(X2,indicies_batch[:,1],axis=0)
-            k_results = k_results.write(k_results.size(), self._k(X_batch, X2_batch,D))
-
+            result = tf.stop_gradient(self._k(X_batch, X2_batch))
+            k_results = k_results.write(k_results.size(), result)
 
 
 
@@ -142,7 +172,7 @@ class OLDStringKernel(Kernel):
         return k_results
 
 
-
+    #@profile
     def _diag_calculations(self, X):
             """
             Calculate the K(x,x) values first because
@@ -150,20 +180,29 @@ class OLDStringKernel(Kernel):
             This is pre-normalization (otherwise diag is just ones)
             """
             # Proceed with kernel matrix calculations in batches
-            D = self._precalc()
+            self._precalc(self.gap_decay_param.read_value())
             k_results = tf.TensorArray(tf.float64, size=0, dynamic_size=True,infer_shape=False)
-            num_batches = tf.math.ceil(tf.shape(X)[0]/self.batch_size)
-            # iterate through batches
-            for i in tf.range(tf.cast(tf.math.ceil(tf.shape(X)[0]/self.batch_size),dtype=tf.int32)):
-                X_batch = X[self.batch_size*i:self.batch_size*(i+1)]
-                k_results = k_results.write(k_results.size(), self._k(X_batch, X_batch,D))
+            
+            data = tf.data.Dataset.from_tensor_slices(X).batch(self.batch_size)
+            for X_batch in data:
+                result = tf.stop_gradient(self._k(X_batch, X_batch))
+                k_results = k_results.write(k_results.size(), result)
 
-            # collect all batches
+
+            # num_batches = tf.math.ceil(tf.shape(X)[0]/self.batch_size)
+            # # iterate through batches
+            # for i in tf.range(tf.cast(tf.math.ceil(tf.shape(X)[0]/self.batch_size),dtype=tf.int32)):
+            #     X_batch = X[self.batch_size*i:self.batch_size*(i+1)]
+            #     k_results = k_results.write(k_results.size(), self._k(X_batch, X_batch))
+            # # collect all batches
             k_results = tf.reshape(k_results.concat(),[1,-1])
             return k_results
 
 
-    def _k(self, X1, X2, D):
+
+    @tf.function()
+    def _k(self, X1, X2):
+
         r"""
         Vectorized kernel calc.
         Following notation from Beck (2017), i.e have tensors S,D,Kpp,Kp
@@ -171,64 +210,67 @@ class OLDStringKernel(Kernel):
         and we calc the pair-wise kernel calcs between the elements (i.e n kern calcs for two lists of length n)
         D is the tensor than unrolls the recursion and allows vecotrizaiton
         """
+        print(f"tracing for input of size {X1.shape}")
+        tf.print(f"executing for input of size {X1.shape}")
 
         # turn into one-hot  i.e. shape (# strings, #characters+1, alphabet size)
-        X1 = tf.one_hot(X1,len(self.alphabet)+1,dtype=tf.float64)
-        X2 = tf.one_hot(X2,len(self.alphabet)+1,dtype=tf.float64)
+        X1 = tf.one_hot(X1,self.alphabet.shape[0]+1,dtype=tf.float64)
+        X2 = tf.one_hot(X2,self.alphabet.shape[0]+1,dtype=tf.float64)
         # remove the ones in the first column that encode the padding (i.e we dont want them to count as a match)
-        paddings = tf.constant([[0, 0], [0, 0],[0,len(self.alphabet)]])
+        paddings = tf.constant([[0, 0], [0, 0],[0,self.alphabet.shape[0]]])
         X1 = X1 - tf.pad(tf.expand_dims(X1[:,:,0], 2),paddings,"CONSTANT")
         X2 = X2 - tf.pad(tf.expand_dims(X2[:,:,0], 2),paddings,"CONSTANT")
         # store squared match coef
-        match_sq = tf.square(self.match_decay)
+        match_sq = tf.multiply(self.match_decay,self.match_decay)
         # Make S: the similarity tensor of shape (# strings, #characters, # characters)
         S = tf.matmul( X1,tf.transpose(X2,perm=(0,2,1)))
         # Main loop, where Kp, Kpp values and gradients are calculated.
-        Kp = tf.TensorArray(tf.float64, size=0, dynamic_size=True,clear_after_read=False)
-        Kp = Kp.write(Kp.size(), tf.ones(shape=tf.stack([tf.shape(X1)[0], self.maxlen,self.maxlen]), dtype=tf.float64))
+
+        Kp = tf.ones(shape=tf.stack([self.max_subsequence_length,tf.shape(X1)[0], self.maxlen,self.maxlen]), dtype=tf.float64)
+
+
         # calc subkernels for each subsequence length
-        for i in tf.range(0,self.max_subsequence_length-1):
-            aux = tf.multiply(S, Kp.read(i))
+        for i in tf.range(self.max_subsequence_length-1):
+            aux = tf.multiply(S, Kp[i])
             aux1 = tf.reshape(aux, tf.stack([-1 , self.maxlen]))
-            aux2 = tf.matmul(aux1, D)
+            aux2 = tf.matmul(aux1, self.D)
             aux = aux2 * match_sq
             aux = tf.reshape(aux, tf.stack([-1, self.maxlen, self.maxlen]))
             aux = tf.transpose(aux, perm=[0, 2, 1])
             aux3 = tf.reshape(aux, tf.stack([-1, self.maxlen]))
-            aux = tf.matmul(aux3, D)
+            aux = tf.matmul(aux3, self.D)
             aux = tf.reshape(aux, tf.stack([-1, self.maxlen, self.maxlen]))
-            Kp = Kp.write(Kp.size(),tf.transpose(aux, perm=[0, 2, 1]))
-
-           
-        # Final calculation. We gather all Kps 
-        Kp_stacked = Kp.stack()
-        Kp.close()
-
+            aux = tf.transpose(aux, perm=[0, 2, 1])
+            Kp = tf.tensor_scatter_nd_update(Kp, [[i+1]], [aux])
 
         # Get k
-        aux = tf.multiply(S, Kp_stacked)
+        aux = tf.multiply(S, Kp)
         aux = tf.reduce_sum(aux, 2)
         sum2 = tf.reduce_sum(aux, 2, keepdims=True)
         Ki = tf.multiply(sum2, match_sq)
         Ki = tf.squeeze(Ki, [2])
         Ki = tf.expand_dims(Ki, 0)
         k = tf.transpose(tf.reduce_sum(Ki,1))
-
         return k
+
+
 
     def _precalc(self):
         # pecalc D as required for every kernel calc
         # following notation from Beck (2017)
 
         # Make D: a upper triangular matrix over decay powers.
-        tf_tril =  tf.linalg.band_part(tf.ones((self.maxlen,self.maxlen),dtype=tf.float64), -1, 0)
-        power = [[0]*i+list(range(0,self.maxlen-i)) for i in range(1,self.maxlen)]+[[0]*self.maxlen]
-        tf_power=tf.constant(power, dtype=tf.float64) + tf_tril
-        #tf_tril = tf.transpose(tf_tril)-tf.eye(self.maxlen,dtype=tf.float64)
-        tf_tril = tf.transpose(tf.linalg.band_part(tf.ones((self.maxlen,self.maxlen),dtype=tf.float64), self.max_occurence_length, 0))-tf.eye(self.maxlen,dtype=tf.float64)
-        gaps = tf.fill([self.maxlen, self.maxlen], tf.squeeze(self.gap_decay))
-        D = tf.pow(gaps*tf_tril, tf_power)
-        return D
+        tril =  tf.linalg.band_part(tf.ones((self.maxlen,self.maxlen),dtype=tf.float64), -1, 0)
+        # get upper triangle matrix of increasing intergers
+        values = tf.TensorArray(tf.int32, size= self.maxlen)
+        for i in tf.range(self.maxlen):
+            values = values.write(i,tf.range(-i-1,self.maxlen-1-i)) 
+        power = tf.cast(values.stack(),tf.float64)
+        values.close()
+        power = tf.linalg.band_part(power, 0, -1) - tf.linalg.band_part(power, 0, 0) + tril
+        tril = tf.transpose(tf.linalg.band_part(tf.ones((self.maxlen,self.maxlen),dtype=tf.float64), self.max_occurence_length, 0))-tf.eye(self.maxlen,dtype=tf.float64)
+        gaps = tf.fill([self.maxlen, self.maxlen],self.gap_decay)
+        self.D = tf.pow(gaps*tril, power)
 
 
 
