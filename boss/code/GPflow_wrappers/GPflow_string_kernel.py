@@ -21,7 +21,7 @@ class StringKernel(Kernel):
     We calculate gradients for match_decay and gap_decay w.r.t kernel hyperparameters following Beck (2017)
     We recommend normalize = True to allow meaningful comparrison of strings of different length
     """
-    def __init__(self, active_dims=[0],gap_decay=0.1, match_decay=0.9, variance=1,max_subsequence_length=3,max_occurence_length=10,
+    def __init__(self, active_dims=[0],gap_decay=0.1, match_decay=0.9,max_subsequence_length=3,max_occurence_length=10,
                  alphabet = [], maxlen=0, normalize = True,batch_size=1000):
         super().__init__(active_dims=active_dims)
         # constrain kernel params to between 0 and 1
@@ -29,7 +29,6 @@ class StringKernel(Kernel):
         logisitc_match = tfb.Chain([tfb.AffineScalar(shift=tf.cast(0,tf.float64),scale=tf.cast(1,tf.float64)),tfb.Sigmoid()])
         self.gap_decay_param = Parameter(gap_decay, transform=logistic_gap,name="gap_decay")
         self.match_decay_param = Parameter(match_decay, transform=logisitc_match,name="match_decay")
-        self.variance_param = Parameter(variance, transform=positive(),name="variance")
         self.max_subsequence_length = max_subsequence_length
         self.max_occurence_length = max_occurence_length
         self.alphabet = alphabet
@@ -43,7 +42,6 @@ class StringKernel(Kernel):
         # These params are updated at every call to K and K_diag (to check if parameters have been updated)
         self.match_decay = self.match_decay_param.numpy()
         self.gap_decay = self.gap_decay_param.numpy()
-        self.variance = self.variance_param.numpy()
 
         # initialize helful construction matricies to be lazily computed once needed
         self.D = None
@@ -125,7 +123,6 @@ class StringKernel(Kernel):
         """
         self.match_decay = self.match_decay_param.numpy()
         self.gap_decay = self.gap_decay_param.numpy()
-        self.variance = self.variance_param.numpy()
 
         tril =  tf.linalg.band_part(tf.ones((self.maxlen,self.maxlen),dtype=tf.float64), -1, 0)
         # get upper triangle matrix of increasing intergers
@@ -271,18 +268,16 @@ class StringKernel(Kernel):
                 norm = tf.tensordot(X_diag_Ks, X2_diag_Ks,axes=0)
                 k_results = tf.divide(k_results, tf.sqrt(norm))
 
-        # finally scale with variance
-        k_final = tf.multiply(k_results,self.variance)
 
 
         def grad(dy, variables=None):
             if self.symmetric:
-                gradient = [tf.reduce_sum(tf.multiply(dy,gap_grads)) , tf.reduce_sum(tf.multiply(dy,match_grads)),tf.reduce_sum(tf.multiply(dy,k_results))]
+                gradient = [tf.reduce_sum(tf.multiply(dy,gap_grads)) , tf.reduce_sum(tf.multiply(dy,match_grads))]
                 return ((None,None),gradient)
             else:
-                return ((None,None),[None,None,None])
+                return ((None,None),[None,None])
 
-        return k_final, grad
+        return k_results, grad
 
 
 

@@ -21,6 +21,10 @@ class StringGPR(GPModel, InternalDataTrainingLossMixin):
     r"""
     Gaussian Process Regression over string inputs
 
+
+    Added a new attribute to allow training of kernel params (over batches if required)
+    This is required to interface with the hard-coded kernel gradients in the String kernel
+
     """
 
     def __init__(
@@ -66,7 +70,7 @@ class StringGPR(GPModel, InternalDataTrainingLossMixin):
 
     
 
-    def fit_kernel_params(self,steps=1,batch_size=None):
+    def fit_kernel_params(self,steps=1,batch_size=None,verbose=True):
         r"""
         Fit kernel parameters usign ADAM 
         Can specifiy batch_size to split up training data
@@ -94,8 +98,9 @@ class StringGPR(GPModel, InternalDataTrainingLossMixin):
                     loss = -self.log_marginal_likelihood(next(batches))
             grads = tape.gradient(loss, self.trainable_variables)
             optimizer.apply_gradients(zip(grads, self.trainable_variables))
-            tf.print(f"Step {step} has batch log likelihood of {loss}")
-            tf.print(f"Model params are {[p.numpy() for p in self.parameters]}")
+            if verbose:
+                tf.print(f"Step {step} has batch log likelihood of {loss}")
+                tf.print(f"Model params are {[p.numpy() for p in self.parameters]}")
 
 
 
