@@ -275,8 +275,7 @@ class StringKernel(Kernel):
         k_final = tf.multiply(k_results,self.variance)
 
 
-        def grad(*dy, variables=None):
-            print(variables)
+        def grad(dy, variables=None):
             if self.symmetric:
                 gradient = [tf.reduce_sum(tf.multiply(dy,gap_grads)) , tf.reduce_sum(tf.multiply(dy,match_grads)),tf.reduce_sum(tf.multiply(dy,k_results))]
                 return ((None,None),gradient)
