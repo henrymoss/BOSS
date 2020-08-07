@@ -77,6 +77,9 @@ class StringGPR(GPModel, InternalDataTrainingLossMixin):
             X, Y =self.data
             train = tf.data.Dataset.from_tensor_slices((X,Y))
             train = train.shuffle(buffer_size = len(X) , seed=1234)
+            if len(X) < batch_size:
+                raise ValueError("batch_size larger than training data")
+
             train = train.repeat(steps // (len(X) // batch_size) + 1)
             train = train.batch(batch_size)
             batches = iter(train)
