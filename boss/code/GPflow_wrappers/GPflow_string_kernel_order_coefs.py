@@ -1,9 +1,14 @@
+
 from gpflow.kernels import Kernel
 from gpflow.utilities import positive
 from gpflow import Parameter
 import tensorflow as tf
 import numpy as np
 from tensorflow_probability import bijectors as tfb
+
+
+
+
 
 class StringKernel(Kernel):
     """
