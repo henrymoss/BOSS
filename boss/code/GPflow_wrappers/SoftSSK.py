@@ -161,7 +161,6 @@ class SoftSSK(Kernel):
         k = tf.linalg.matvec(tf.transpose(Ki),self.order_coefs)
         k = tf.expand_dims(k,1)
 
-
         # put results into the right places in the gram matrix and normalize
         if self.symmetric:
             # if symmetric then only put in top triangle (inc diag)
