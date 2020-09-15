@@ -66,6 +66,7 @@ class StringGPR(GPModel, InternalDataTrainingLossMixin):
 
         # [R,] log-likelihoods for each independent dimension of Y
         log_prob = multivariate_normal(Y, m, L)
+        print(tf.reduce_sum(log_prob))
         return tf.reduce_sum(log_prob)
 
     
@@ -75,7 +76,9 @@ class StringGPR(GPModel, InternalDataTrainingLossMixin):
         Fit kernel parameters usign ADAM 
         Can specifiy batch_size to split up training data
         """      
-        optimizer = tf.optimizers.Adam(learning_rate=0.1)
+
+        optimizer = tf.optimizers.Adam(learning_rate=0.001)
+
         # prepare data for batching
         if batch_size is not None:
             X, Y =self.data
@@ -97,11 +100,13 @@ class StringGPR(GPModel, InternalDataTrainingLossMixin):
                 else:
                     loss = -self.log_marginal_likelihood(next(batches))
             grads = tape.gradient(loss, self.trainable_variables)
-            print(grads)
             optimizer.apply_gradients(zip(grads, self.trainable_variables))
             if verbose:
                 tf.print(f"Step {step} has batch log likelihood of {loss}")
                 tf.print(f"Model params are {[p.numpy() for p in self.parameters]}")
+
+
+        return loss 
 
 
 

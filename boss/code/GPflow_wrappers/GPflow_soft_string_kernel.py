@@ -6,12 +6,9 @@ import numpy as np
 from tensorflow_probability import bijectors as tfb
 
 
-from IPython import embed
-
-
-class PatchStringKernel(Kernel):
+class SoftStringKernel(Kernel):
     """
-    Code to run a patch string kernel
+    Code to run the SSK of Moss et al. 2020 with gpflow
     
    with hyperparameters:
     1) match_decay float
@@ -26,29 +23,23 @@ class PatchStringKernel(Kernel):
     We recommend normalize = True to allow meaningful comparrison of strings of different length
     """
     def __init__(self, active_dims=[0],gap_decay=0.1, match_decay=0.9,max_subsequence_length=3,max_occurence_length=10,
-                 alphabet = [], patch=None, maxlen=0, normalize = True,batch_size=1000):
+                 alphabet = [], maxlen=0, normalize = True,batch_size=1000,sim=None):
         super().__init__(active_dims=active_dims)
         # constrain kernel params to between 0 and 1
-        if patch is None:
-            patch = [0.5]*len(alphabet)
-        else:
-            patch=patch
-
-
         self.logistic_gap = tfb.Chain([tfb.AffineScalar(shift=tf.cast(0,tf.float64),scale=tf.cast(1,tf.float64)),tfb.Sigmoid()])
         self.logisitc_match = tfb.Chain([tfb.AffineScalar(shift=tf.cast(0,tf.float64),scale=tf.cast(1,tf.float64)),tfb.Sigmoid()])
-        self.logisitc_patch = tfb.Chain([tfb.AffineScalar(shift=tf.cast(0,tf.float64),scale=tf.cast(1,tf.float64)),tfb.Sigmoid()])
-        
         self.gap_decay_param = Parameter(gap_decay, transform=self.logistic_gap,name="gap_decay")
         self.match_decay_param = Parameter(match_decay, transform=self.logisitc_match,name="match_decay")
-        self.patch_param = Parameter(patch, transform=self.logisitc_patch,name="patch_param")
-    
-
-
-
         self.max_subsequence_length = max_subsequence_length
         self.max_occurence_length = max_occurence_length
         self.alphabet = alphabet
+        if sim is None:
+            self.sim = tf.constant(np.identity(len(self.alphabet)),dtype=tf.float64)
+        else:
+            if len(sim)!=len(self.alphabet):
+                raise ValueError("sim needs to be square matrix of rank equal to the alphabet size")
+            else:
+                self.sim = tf.constant(sim,dtype=tf.float64)
         self.maxlen = maxlen
         self.normalize = normalize
         self.batch_size = batch_size
@@ -59,10 +50,10 @@ class PatchStringKernel(Kernel):
         # These params are updated at every call to K and K_diag (to check if parameters have been updated)
         self.match_decay = self.match_decay_param.numpy()
         self.gap_decay = self.gap_decay_param.numpy()
-        self.patch = self.patch_param.numpy()
         self.match_decay_unconstrained = self.match_decay_param.unconstrained_variable.numpy()
         self.gap_decay_unconstrained = self.gap_decay_param.unconstrained_variable.numpy()
-        self.patch_unconstrained = self.patch_param.unconstrained_variable.numpy()
+
+
 
         # initialize helful construction matricies to be lazily computed once needed
         self.D = None
@@ -144,11 +135,9 @@ class PatchStringKernel(Kernel):
         """
         self.match_decay = self.match_decay_param.numpy()
         self.gap_decay = self.gap_decay_param.numpy()
-        self.patch = self.patch_param.numpy()
-
         self.match_decay_unconstrained = self.match_decay_param.unconstrained_variable.numpy()
         self.gap_decay_unconstrained = self.gap_decay_param.unconstrained_variable.numpy()
-        self.patch_unconstrained = self.patch_param.unconstrained_variable.numpy()
+
 
         tril =  tf.linalg.band_part(tf.ones((self.maxlen,self.maxlen),dtype=tf.float64), -1, 0)
         # get upper triangle matrix of increasing intergers
@@ -206,7 +195,6 @@ class PatchStringKernel(Kernel):
             k_results = tf.TensorArray(tf.float64, size=0, dynamic_size=True,infer_shape=False)
             gap_grads = tf.TensorArray(tf.float64, size=0, dynamic_size=True,infer_shape=False)
             match_grads = tf.TensorArray(tf.float64, size=0, dynamic_size=True,infer_shape=False)
-            patch_grads = tf.TensorArray(tf.float64, size=0, dynamic_size=True,infer_shape=False)
             for i in tf.range(tf.cast(tf.math.ceil(tf.shape(indicies)[0]/self.batch_size),dtype=tf.int32)):
                 indicies_batch = indicies[self.batch_size*i:self.batch_size*(i+1)]
                 X_batch = tf.gather(X,indicies_batch[:,0],axis=0)
@@ -215,15 +203,10 @@ class PatchStringKernel(Kernel):
                 k_results = k_results.write(k_results.size(), results[0])
                 gap_grads = gap_grads.write(gap_grads.size(),results[1])
                 match_grads = match_grads.write(match_grads.size(),results[2])
-                patch_grads = patch_grads.write(patch_grads.size(),results[3])
-
             # combine indivual kernel results
             k_results = tf.reshape(k_results.concat(),[1,-1])
             gap_grads = tf.reshape(gap_grads.concat(),[1,-1])
             match_grads = tf.reshape(match_grads.concat(),[1,-1])
-            patch_grads = tf.transpose(patch_grads.concat())
-
-
         else:
             k_results = tf.TensorArray(tf.float64, size=0, dynamic_size=True,infer_shape=False)
             for i in tf.range(tf.cast(tf.math.ceil(tf.shape(indicies)[0]/self.batch_size),dtype=tf.int32)):
@@ -233,6 +216,8 @@ class PatchStringKernel(Kernel):
                 k_results = k_results.write(k_results.size(), self._k(X_batch, X2_batch))
             # combine indivual kernel results
             k_results = tf.reshape(k_results.concat(),[1,-1])
+
+
 
         # put results into the right places in the gram matrix
         # if symmetric then only put in top triangle (inc diag)
@@ -247,26 +232,10 @@ class PatchStringKernel(Kernel):
             out = tf.SparseTensor(indices,tf.squeeze(match_grads),dense_shape=tf.cast((tf.shape(X)[0],tf.shape(X)[0]),dtype=tf.int64))
             match_grads = tf.sparse.to_dense(out)
 
-            #add in mising elements (lower diagonal) and avoid counting diag twice
+            #add in mising elements (lower diagonal)
             k_results = k_results + tf.linalg.set_diag(tf.transpose(k_results),tf.zeros(tf.shape(X)[0],dtype=tf.float64))
             gap_grads = gap_grads + tf.linalg.set_diag(tf.transpose(gap_grads),tf.zeros(tf.shape(X)[0],dtype=tf.float64))
             match_grads = match_grads + tf.linalg.set_diag(tf.transpose(match_grads),tf.zeros(tf.shape(X)[0],dtype=tf.float64))
-        
-
-            # slighlity more complicated for patch grads (as tensors not scalars)
-            patch_grads_symmetric = tf.TensorArray(tf.float64, size=len(self.alphabet))
-
-            for i in tf.range(len(self.alphabet)):
-                out = tf.SparseTensor(indices,tf.squeeze(patch_grads[i]),dense_shape=tf.cast((tf.shape(X)[0],tf.shape(X)[0]),dtype=tf.int64))
-                patch_grads_single = tf.sparse.to_dense(out)
-                patch_grads_single = patch_grads_single + tf.linalg.set_diag(tf.transpose(patch_grads_single),tf.zeros(tf.shape(X)[0],dtype=tf.float64))
-                patch_grads_symmetric = patch_grads_symmetric.write(i,patch_grads_single)
-            patch_grads  = patch_grads_symmetric.stack()
-            patch_grads_symmetric.close()
-
-
-
-
         else:
             k_results = tf.reshape(k_results,[tf.shape(X)[0],tf.shape(X2)[0]])
 
@@ -287,16 +256,7 @@ class PatchStringKernel(Kernel):
                 diff_match = tf.divide(tf.tensordot(X_diag_match_grads,X_diag_Ks,axes=0) + tf.tensordot(X_diag_Ks,X_diag_match_grads,axes=0),2 * norm)
                 gap_grads= tf.divide(gap_grads, tf.sqrt(norm)) - tf.multiply(k_results,diff_gap)
                 match_grads = tf.divide(match_grads, tf.sqrt(norm)) - tf.multiply(k_results,diff_match)
-               
-               # get norms for each patch grad
-                patch_grads_norm = tf.TensorArray(tf.float64, size=len(self.alphabet))
-                for i in tf.range(len(self.alphabet)):
-                    X_diag_patch_grads = tf.linalg.diag_part(patch_grads[i])
-                    diff_patch = tf.divide(tf.tensordot(X_diag_patch_grads,X_diag_Ks,axes=0) + tf.tensordot(X_diag_Ks,X_diag_patch_grads,axes=0),2 * norm)
-                    patch_grads_single = tf.divide(patch_grads[i], tf.sqrt(norm)) - tf.multiply(k_results,diff_patch)
-                    patch_grads_norm = patch_grads_norm.write(i,patch_grads_single)
-                patch_grads = patch_grads_norm.stack()
-                patch_grads_norm.close()
+            
 
             else:
                 # if not symmetric then need to calculate some extra kernel calcs
@@ -329,26 +289,16 @@ class PatchStringKernel(Kernel):
 
         def grad(dy, variables=None):
             if self.symmetric:
-
-
                 # get gradients of unconstrained params
                 grads= {}
                 grads['gap_decay:0'] = tf.reduce_sum(tf.multiply(dy,gap_grads*tf.math.exp(self.logistic_gap.forward_log_det_jacobian(self.gap_decay_unconstrained,0))))
                 grads['match_decay:0'] = tf.reduce_sum(tf.multiply(dy,match_grads*tf.math.exp(self.logisitc_match.forward_log_det_jacobian(self.match_decay_unconstrained,0))))
-                #grads['patch_param:0']=tf.reduce_sum(tf.reduce_sum(tf.multiply(dy,patch_grads),-1),-1)
-                grads['patch_param:0']=tf.reduce_sum(tf.reduce_sum(tf.multiply(dy,patch_grads*tf.reshape(tf.math.exp(self.logisitc_patch.forward_log_det_jacobian(self.patch_unconstrained,0)),(-1,1,1))),-1),-1)
-                
-
-
                 gradient = [grads[v.name] for v in variables]
-                
                 return ((None,None),gradient)
             else:
-
-                return ((None,None),[None,None,None])
+                return ((None,None),[None,None])
 
         return k_results, grad
-
 
 
 
@@ -364,45 +314,26 @@ class PatchStringKernel(Kernel):
         # turn into one-hot  i.e. shape (# strings, #characters+1, alphabet size)
         X1 = tf.one_hot(X1,len(self.alphabet)+1,dtype=tf.float64)
         X2 = tf.one_hot(X2,len(self.alphabet)+1,dtype=tf.float64)
-
-
         # remove the first column that encode the padding (i.e we dont want them to count as a match)
         X1 = X1[:,:,1:]
         X2 = X2[:,:,1:]
-
-
-        # times by pad weights
-        X1_weighted = tf.multiply(X1,tf.math.sqrt(self.patch))
-        X2_weighted = tf.multiply(X2,tf.math.sqrt(self.patch))
-
-        match_sq = tf.square(self.match_decay)
-
+        # convert X1 into rows from sim matrix
+        X1 = tf.linalg.matmul(X1,self.sim)
         # Make S: the similarity tensor of shape (# strings, #characters, # characters)
-        S = tf.matmul( X1_weighted,tf.transpose(X2_weighted,perm=(0,2,1)))
-        # build dS_dpatch for each elemnt in patch (same number as alphabet size)
-        dS_dpatch = tf.TensorArray(tf.float64, size=0, dynamic_size=True,clear_after_read=False)
-        
+        S = tf.matmul( X1,tf.transpose(X2,perm=(0,2,1)))
 
 
-        for i in range(0,len(self.alphabet)):
-            dS_dpatch = dS_dpatch.write(dS_dpatch.size(),tf.matmul(tf.expand_dims(X1[:,:,i],-1),tf.transpose(tf.expand_dims(X2[:,:,i],-1),perm=(0,2,1))))
-        dS_dpatch = dS_dpatch.stack()
-
-
+        # store squared match coef
+        match_sq = tf.square(self.match_decay)
         # Main loop, where Kp, Kpp values and gradients are calculated.
         Kp = tf.TensorArray(tf.float64, size=0, dynamic_size=True,clear_after_read=False)
         dKp_dgap = tf.TensorArray(tf.float64, size=0, dynamic_size=True,clear_after_read=False)
         dKp_dmatch = tf.TensorArray(tf.float64, size=0, dynamic_size=True,clear_after_read=False)
-        dKp_dpatch = tf.TensorArray(tf.float64, size=0, dynamic_size=True,clear_after_read=False)
-            
         Kp = Kp.write(Kp.size(), tf.ones(shape=tf.stack([tf.shape(X1)[0], self.maxlen,self.maxlen]), dtype=tf.float64))
         dKp_dgap = dKp_dgap.write(dKp_dgap.size(), tf.zeros(shape=tf.stack([tf.shape(X1)[0], self.maxlen,self.maxlen]), dtype=tf.float64))
         dKp_dmatch = dKp_dmatch.write(dKp_dmatch.size(), tf.zeros(shape=tf.stack([tf.shape(X1)[0], self.maxlen,self.maxlen]), dtype=tf.float64))
-        dKp_dpatch = dKp_dpatch.write(dKp_dpatch.size(), tf.zeros(shape=tf.stack([len(self.alphabet),tf.shape(X1)[0], self.maxlen,self.maxlen]), dtype=tf.float64))
-     
 
-
-         # calc subkernels for each subsequence length
+        # calc subkernels for each subsequence length
         for i in tf.range(0,self.max_subsequence_length-1):
             
 
@@ -428,17 +359,6 @@ class PatchStringKernel(Kernel):
             dKp_dmatch = dKp_dmatch.write(dKp_dmatch.size(),dKp_dmatch_temp_1 + dKp_dmatch_temp_2)
 
 
-
-            dKp_dpatch_temp = tf.multiply(dS_dpatch, Kp.read(i)) 
-            dKp_dpatch_temp = dKp_dpatch_temp + tf.multiply(S, dKp_dpatch.read(i))
-            dKp_dpatch_temp = dKp_dpatch_temp * match_sq
-            dKp_dpatch_temp = tf.matmul(dKp_dpatch_temp,self.D)
-            dKp_dpatch_temp = tf.matmul(self.D,dKp_dpatch_temp,transpose_a=True)
-            dKp_dpatch = dKp_dpatch.write(dKp_dpatch.size(),dKp_dpatch_temp)
-
-
-
-
         # Final calculation. We gather all Kps 
         Kp_stacked = Kp.stack()
         Kp.close()
@@ -446,8 +366,7 @@ class PatchStringKernel(Kernel):
         dKp_dgap.close()
         dKp_dmatch_stacked = dKp_dmatch.stack()
         dKp_dmatch.close()
-        dKp_dpatch_stacked = dKp_dpatch.stack()
-        dKp_dpatch.close()
+
 
         # get k
         temp = tf.multiply(S, Kp_stacked)
@@ -475,25 +394,7 @@ class PatchStringKernel(Kernel):
         dk_dmatch = tf.expand_dims(dk_dmatch,1)
 
 
-        # get patch decay grads
-        # S: [b,l,l]
-        # dKp_dpatch_stacked: [n,a,b,l,l]
-        # dS_dpatch: [a,b,l,l]
-        # Kp_stacked: [n,b,l,l]
-        # so make everything [n,a,b,l,l]
-
-        temp = tf.multiply(tf.expand_dims(tf.expand_dims(S,0),0), dKp_dpatch_stacked)
-        temp = temp + tf.multiply(tf.expand_dims(dS_dpatch,0), tf.expand_dims(Kp_stacked,1))
-        temp = tf.reduce_sum(temp, -1)
-        temp = tf.reduce_sum(temp, -1)
-        temp = temp * match_sq
-        temp = tf.reduce_sum(temp,0)
-        dk_dpatch = tf.transpose(temp)
-
-        # end up with [b,a]
-
-
-        return k, dk_dgap, dk_dmatch, dk_dpatch
+        return k, dk_dgap, dk_dmatch
 
 
 
@@ -513,20 +414,20 @@ class PatchStringKernel(Kernel):
         # remove the first column that encode the padding (i.e we dont want them to count as a match)
         X1 = X1[:,:,1:]
         X2 = X2[:,:,1:]
-
-        # times by pad weights
-        X1 = tf.multiply(X1,tf.math.sqrt(self.patch))
-        X2 = tf.multiply(X2,tf.math.sqrt(self.patch))
-
+        # convert X1 into rows from sim matrix
+        X1 = tf.linalg.matmul(X1,self.sim)
+        # Make S: the similarity tensor of shape (# strings, #characters, # characters)
+        S = tf.matmul( X1,tf.transpose(X2,perm=(0,2,1)))
         # store squared match coef
         match_sq = tf.square(self.match_decay)
-        # Make S: the similarity tensor of shape (# strings, #characters, # characters)
 
-        S = tf.matmul( X1,tf.transpose(X2,perm=(0,2,1)))
+
         # Main loop, where Kp, Kpp values and gradients are calculated.
         Kp = tf.TensorArray(tf.float64, size=0, dynamic_size=True,clear_after_read=False)
         Kp = Kp.write(Kp.size(), tf.ones(shape=tf.stack([tf.shape(X1)[0], self.maxlen,self.maxlen]), dtype=tf.float64))
-        
+
+
+
         # calc subkernels for each subsequence length
         for i in tf.range(0,self.max_subsequence_length-1):
             temp = tf.multiply(S, Kp.read(i))
@@ -539,19 +440,51 @@ class PatchStringKernel(Kernel):
         Kp_stacked = Kp.stack()
         Kp.close()
     
-    
+
 
         # Get k
-        temp = tf.multiply(S, Kp_stacked)
-        temp = tf.reduce_sum(temp, -1)
-        sum2 = tf.reduce_sum(temp, -1)
-        Ki = sum2 * match_sq
+        aux = tf.multiply(S, Kp_stacked)
+        aux = tf.reduce_sum(aux, -1)
+        sum2 = tf.reduce_sum(aux, -1)
+        Ki = tf.multiply(sum2, match_sq)
         k = tf.reduce_sum(Ki,0)
         k = tf.expand_dims(k,1)
 
 
-
         return k
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 
 

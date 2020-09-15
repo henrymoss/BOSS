@@ -26,10 +26,10 @@ class StringKernel(Kernel):
                  alphabet = [], maxlen=0, normalize = True,batch_size=1000):
         super().__init__(active_dims=active_dims)
         # constrain kernel params to between 0 and 1
-        logistic_gap = tfb.Chain([tfb.AffineScalar(shift=tf.cast(0,tf.float64),scale=tf.cast(1,tf.float64)),tfb.Sigmoid()])
-        logisitc_match = tfb.Chain([tfb.AffineScalar(shift=tf.cast(0,tf.float64),scale=tf.cast(1,tf.float64)),tfb.Sigmoid()])
-        self.gap_decay_param = Parameter(gap_decay, transform=logistic_gap,name="gap_decay")
-        self.match_decay_param = Parameter(match_decay, transform=logisitc_match,name="match_decay")
+        self.logistic_gap = tfb.Chain([tfb.AffineScalar(shift=tf.cast(0,tf.float64),scale=tf.cast(1,tf.float64)),tfb.Sigmoid()])
+        self.logisitc_match = tfb.Chain([tfb.AffineScalar(shift=tf.cast(0,tf.float64),scale=tf.cast(1,tf.float64)),tfb.Sigmoid()])
+        self.gap_decay_param = Parameter(gap_decay, transform=self.logistic_gap,name="gap_decay")
+        self.match_decay_param = Parameter(match_decay, transform=self.logisitc_match,name="match_decay")
         self.max_subsequence_length = max_subsequence_length
         self.max_occurence_length = max_occurence_length
         self.alphabet = alphabet
@@ -43,6 +43,10 @@ class StringKernel(Kernel):
         # These params are updated at every call to K and K_diag (to check if parameters have been updated)
         self.match_decay = self.match_decay_param.numpy()
         self.gap_decay = self.gap_decay_param.numpy()
+        self.match_decay_unconstrained = self.match_decay_param.unconstrained_variable.numpy()
+        self.gap_decay_unconstrained = self.gap_decay_param.unconstrained_variable.numpy()
+
+
 
         # initialize helful construction matricies to be lazily computed once needed
         self.D = None
@@ -96,14 +100,11 @@ class StringKernel(Kernel):
         Efficientely calculating kernel gradients requires dynamic programming 
         and so we 'turn off' autograd and calculate manually
 
-        We currentely only bother calculating the kernel gradients for gram matricies
+        We currently only bother calculating the kernel gradients for gram matricies
         i.e (when X=X2) as required when fitting the model.
         For predictions (where X != X2) we do not calculate gradients
         """
 
-        # we currentely only bother calculating the kernel gradients for gram matricies
-        # i.e (when X=X2) as required when fitting the model, denoted as symmetric = True
-        # For predictions (where X != X2) we do not calculate gradients
 
         if X2 is None:
             self.symmetric = True
@@ -124,6 +125,9 @@ class StringKernel(Kernel):
         """
         self.match_decay = self.match_decay_param.numpy()
         self.gap_decay = self.gap_decay_param.numpy()
+        self.match_decay_unconstrained = self.match_decay_param.unconstrained_variable.numpy()
+        self.gap_decay_unconstrained = self.gap_decay_param.unconstrained_variable.numpy()
+
 
         tril =  tf.linalg.band_part(tf.ones((self.maxlen,self.maxlen),dtype=tf.float64), -1, 0)
         # get upper triangle matrix of increasing intergers
@@ -275,7 +279,11 @@ class StringKernel(Kernel):
 
         def grad(dy, variables=None):
             if self.symmetric:
-                gradient = [tf.reduce_sum(tf.multiply(dy,gap_grads)) , tf.reduce_sum(tf.multiply(dy,match_grads))]
+                # get gradients of unconstrained params
+                grads= {}
+                grads['gap_decay:0'] = tf.reduce_sum(tf.multiply(dy,gap_grads*tf.math.exp(self.logistic_gap.forward_log_det_jacobian(self.gap_decay_unconstrained,0))))
+                grads['match_decay:0'] = tf.reduce_sum(tf.multiply(dy,match_grads*tf.math.exp(self.logisitc_match.forward_log_det_jacobian(self.match_decay_unconstrained,0))))
+                gradient = [grads[v.name] for v in variables]
                 return ((None,None),gradient)
             else:
                 return ((None,None),[None,None])
