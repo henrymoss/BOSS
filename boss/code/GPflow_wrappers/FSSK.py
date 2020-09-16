@@ -3,14 +3,12 @@ from gpflow.utilities import positive
 from gpflow import Parameter
 import tensorflow as tf
 from tensorflow_probability import bijectors as tfb
+import tensorflow_probability as tfp
 import numpy as np
-import math as m
 
-from IPython import embed
-
-class ACSSK(Kernel):
+class FSSK(Kernel):
     """
-    Code to run an arc-cosine SSK with gpflow
+    Code to run a soft-matched SSK with gpflow
     
    with hyperparameters:
     1) match_decay float
@@ -19,33 +17,36 @@ class ACSSK(Kernel):
         decrease the contribtuion of subsequences with large gaps (penalize non-contiguous)
     3) max_subsequence_length int 
         largest subsequence considered
-    """
+    4) rank int
+         rank of decomposition of similairty matrix (total free similarity parameters = alpahabet_size * (rank+1))
+       """
 
     def __init__(self,rank=1,active_dims=[0],gap_decay=0.1, match_decay=0.9,max_subsequence_length=3,
                  alphabet = [], maxlen=0):
         super().__init__(active_dims=active_dims)
-        # constrain kernel params to between 0 and 1
+        # constrain decay kernel params to between 0 and 1
         logistic_gap = tfb.Chain([tfb.Shift(tf.cast(0,tf.float64))(tfb.Scale(tf.cast(1,tf.float64))),tfb.Sigmoid()])
         logisitc_match = tfb.Chain([tfb.AffineScalar(shift=tf.cast(0,tf.float64),scale=tf.cast(1,tf.float64)),tfb.Sigmoid()])
-        logistic_patch = tfb.Chain([tfb.AffineScalar(shift=tf.cast(0,tf.float64),scale=tf.cast(1,tf.float64)),tfb.Sigmoid()])
         self.gap_decay= Parameter(gap_decay, transform=logistic_gap ,name="gap_decay")
         self.match_decay = Parameter(match_decay, transform=logisitc_match,name="match_decay")
-        
-        
+
+        # prepare similarity matrix parameters
+        self.rank=rank
+        W = 0.1 * tf.ones((len(alphabet), self.rank))
+        kappa = 0.99*tf.ones(len(alphabet))
+        weights = 0.99*tf.ones(len(alphabet))
+        self.W = Parameter(W,name="W")
+        self.kappa = Parameter(kappa, transform=positive(),name="kappa")
+  
+        # prepare order coefs params
+        order_coefs=tf.ones(max_subsequence_length)
+        self.order_coefs =  Parameter(order_coefs, transform=positive(),name="order_coefs")
+
+        # store additional kernel parameters
         self.max_subsequence_length = tf.constant(max_subsequence_length)
         self.alphabet =  tf.constant(alphabet)
         self.alphabet_size=tf.shape(self.alphabet)[0]
         self.maxlen =  tf.constant(maxlen)
-
-        self.order=0
-
-        self.rank=rank
-        W = 0.1 * tf.ones((len(alphabet), self.rank))
-        kappa = tf.ones(len(alphabet))
-        self.W = Parameter(W,name="W")
-        self.kappa = Parameter(kappa, transform=positive(),name="kappa")
-    
-
 
         # build a lookup table of the alphabet to encode input strings
         self.table = tf.lookup.StaticHashTable(
@@ -56,60 +57,9 @@ class ACSSK(Kernel):
 
     def K_diag(self, X):
         r"""
-        return diagonal kernel elements
+        The diagonal elements of the string kernel are always unity (due to normalisation)
         """
-        output_shape = tf.shape(X)[:-1]
-        X = tf.strings.split(tf.squeeze(X,1)).to_tensor("PAD",shape=[None,self.maxlen])
-        X = self.table.lookup(X)
-        # keep track of original input sizes
-        X_shape = tf.shape(X)[0]
-    
-        # prep the decay tensor D 
-        self.D = self._precalc()
-
-
-        # turn into one-hot  i.e. shape (# strings, #characters+1, alphabet size)
-        X = tf.one_hot(X,self.alphabet_size+1,dtype=tf.float64)
-        # remove the ones in the first column that encode the padding (i.e we dont want them to count as a match)
-        X = X[:,:,1:]
-
-        # make similarity matrix
-        sim = tf.linalg.matmul(self.W, self.W, transpose_b=True) + tf.linalg.diag(self.kappa)
-
-        # Make S: the similarity tensor of shape (# strings, #characters, # characters)
-        S = tf.matmul( tf.matmul(X,sim),tf.transpose(X,perm=(0,2,1)))
-
-        # store squared match coef
-        match_sq = tf.square(self.match_decay)
-
-        # calc subkernels for each subsequence length
-        Kp = tf.TensorArray(tf.float64, size=0, dynamic_size=True,clear_after_read=False)
-        Kp = Kp.write(Kp.size(), tf.ones(shape=tf.stack([tf.shape(X)[0], self.maxlen,self.maxlen]), dtype=tf.float64))
-        
-        for i in tf.range(self.max_subsequence_length-1):
-            Kp_temp = tf.multiply(S, Kp.read(i))
-            Kp_temp0 =  match_sq * Kp_temp
-            Kp_temp1 = tf.matmul(Kp_temp0,self.D)
-            Kp_temp2 = tf.matmul(self.D,Kp_temp1,transpose_a=True)
-            Kp = Kp.write(Kp.size(),Kp_temp2)
-        Kp_stacked = Kp.stack()
-        Kp.close()
-        
-        # combine and get overall kernel
-        aux = tf.multiply(S, Kp_stacked)
-        aux = tf.reduce_sum(aux, -1)
-        sum2 = tf.reduce_sum(aux, -1)
-        Ki = sum2 * match_sq
-        k = tf.reduce_sum(Ki,0)
-        k = tf.expand_dims(k,1)
-
-
-        # now deal with arc-cosine bits
-        theta = tf.zeros((tf.shape(k)),dtype=tf.float64)
-        J = tf.cast(tf.constant(m.pi),tf.float64) - theta
-        k_results = (1/tf.cast(tf.constant(m.pi),tf.float64))*J
-        k_results = k_results*tf.pow(tf.sqrt(k),tf.cast(self.order,tf.float64))
-        return tf.reshape(k_results,output_shape)
+        return tf.ones(tf.shape(X)[:-1],dtype=tf.float64)
 
 
 
@@ -149,6 +99,10 @@ class ACSSK(Kernel):
         X1 = X1[:,:,1:]
         X2 = X2[:,:,1:]
 
+  
+
+
+
         # get indicies of all possible pairings from X and X2
         # this way allows maximum number of kernel calcs to be squished onto the GPU (rather than just doing individual rows of gram)
         indicies_2, indicies_1 = tf.meshgrid(tf.range(0, tf.shape(X2)[0]),tf.range(0, tf.shape(X1)[0]))
@@ -165,11 +119,20 @@ class ACSSK(Kernel):
             X1_full = tf.concat([X1_full,X1,X2],0)
             X2_full = tf.concat([X2_full,X1,X2],0)
      
+
         # make similarity matrix
-        sim = tf.linalg.matmul(self.W, self.W, transpose_b=True) + tf.linalg.diag(self.kappa)
+        self.sim = tf.linalg.matmul(self.W, self.W, transpose_b=True) + tf.linalg.diag(self.kappa)
+        self.sim = self.sim/tf.math.maximum(tf.reduce_max(self.sim),1)
+        #self.sim = self.sim/self.sim[0][0]
+
+
 
         # Make S: the similarity tensor of shape (# strings, #characters, # characters)
-        S = tf.matmul( tf.matmul(X1_full,sim),tf.transpose(X2_full,perm=(0,2,1)))
+
+        S = tf.matmul( tf.matmul(X1_full,self.sim),tf.transpose(X2_full,perm=(0,2,1)))
+
+
+
 
         # store squared match coef
         match_sq = tf.square(self.match_decay)
@@ -192,9 +155,9 @@ class ACSSK(Kernel):
         aux = tf.reduce_sum(aux, -1)
         sum2 = tf.reduce_sum(aux, -1)
         Ki = sum2 * match_sq
-        k = tf.reduce_sum(Ki,0)
+        #k = tf.reduce_sum(Ki,0)
+        k = tf.linalg.matvec(tf.transpose(Ki),self.order_coefs)
         k = tf.expand_dims(k,1)
-
 
         # put results into the right places in the gram matrix and normalize
         if self.symmetric:
@@ -214,19 +177,20 @@ class ACSSK(Kernel):
         else:
             # otherwise can just reshape into gram matrix
             # but first take extra kernel calcs off end of k
+
+            # COULD SPEED THIS UP FOR PREDICTIONS, AS MANY NORM TERMS ALREADY IN GRAM
+
             X_diag_Ks = tf.reshape(k[X1_shape*X2_shape:X1_shape*X2_shape+X1_shape],(-1,))
+
             X2_diag_Ks = tf.reshape(k[-X2_shape:],(-1,))
+
             k = k[0:X1_shape*X2_shape]
             k_results = tf.reshape(k,[X1_shape,X2_shape])
             # normalise
             norm = tf.tensordot(X_diag_Ks, X2_diag_Ks,axes=0)
             k_results = tf.divide(k_results, tf.sqrt(norm))
-        # now deal with arc-cosine bits
-        jitter = 1e-15
-        theta = tf.math.acos(jitter + (1 - 2 * jitter)*k_results)
-        J = tf.cast(tf.constant(m.pi),tf.float64) - theta
-        k_results = (1/tf.cast(tf.constant(m.pi),tf.float64))*J
-        k_results = k_results*tf.pow(tf.sqrt(norm),tf.cast(self.order,tf.float64))
+
+
         return k_results
 
 
