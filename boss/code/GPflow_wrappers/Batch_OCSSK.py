@@ -162,7 +162,7 @@ class Batch_OCSSK(Kernel):
             X_diag_Ks = tf.reshape(k[X1_shape*X2_shape:X1_shape*X2_shape+X1_shape],(-1,))
             X2_diag_Ks = tf.reshape(k[-X2_shape:],(-1,))
             k = k[0:X1_shape*X2_shape]
-            k_results = tf.reshape(k,[X1_shape,X2_shape])
+            k_results = tf.transpose(tf.reshape(k,[X2_shape,X1_shape]))
             
             # normalise
             norm = tf.tensordot(X_diag_Ks, X2_diag_Ks,axes=0)

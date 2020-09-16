@@ -111,17 +111,10 @@ class Batch_SSK(Kernel):
             # if not symmetric need to calculate some extra kernel evals for the normalization later on
             indicies = tf.concat([indicies,tf.tile(tf.expand_dims(tf.range(tf.shape(X_full)[0]),1),(1,2))],0)
 
-        # make similarity matrix
-        #self.sim = tf.linalg.matmul(self.W, self.W, transpose_b=True) + tf.linalg.diag(self.kappa)
-        #self.sim = self.sim/tf.math.maximum(tf.reduce_max(self.sim),1)
-        
-
-
         # make kernel calcs in batches
         num_batches = tf.cast(tf.math.ceil(tf.shape(indicies)[0]/self.batch_size),dtype=tf.int32)
         k_split =  tf.TensorArray(tf.float64, size=num_batches,clear_after_read=False,infer_shape=False)
         
-    
 
         # iterate through batches
         for j in tf.range(num_batches):
@@ -160,18 +153,17 @@ class Batch_SSK(Kernel):
             norm = tf.tensordot(X_diag_Ks, X_diag_Ks,axes=0)
             k_results = tf.divide(k_results, tf.sqrt(norm))
         else:
+
             # otherwise can just reshape into gram matrix
             # but first take extra kernel calcs off end of k and use them to normalise
             X_diag_Ks = tf.reshape(k[X1_shape*X2_shape:X1_shape*X2_shape+X1_shape],(-1,))
             X2_diag_Ks = tf.reshape(k[-X2_shape:],(-1,))
             k = k[0:X1_shape*X2_shape]
-            k_results = tf.reshape(k,[X1_shape,X2_shape])
-            
+            k_results = tf.transpose(tf.reshape(k,[X2_shape,X1_shape]))
             # normalise
             norm = tf.tensordot(X_diag_Ks, X2_diag_Ks,axes=0)
             k_results = tf.divide(k_results, tf.sqrt(norm))
 
-        print("done a k")
 
         return k_results
 
