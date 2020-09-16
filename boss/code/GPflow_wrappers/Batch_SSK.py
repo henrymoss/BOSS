@@ -171,6 +171,8 @@ class Batch_SSK(Kernel):
             norm = tf.tensordot(X_diag_Ks, X2_diag_Ks,axes=0)
             k_results = tf.divide(k_results, tf.sqrt(norm))
 
+        print("done a k")
+
         return k_results
 
 
