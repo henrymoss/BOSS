@@ -230,7 +230,6 @@ class Batch_PatchSSK(Kernel):
                 grads['match_decay:0'] = tf.reduce_sum(tf.multiply(dy,dk_dmatch*tf.math.exp(self.logisitc_match.forward_log_det_jacobian(self.match_decay_unconstrained,0))))
                 dy_tiled = tf.tile(tf.expand_dims(dy,1),(1,self.alphabet_size))
                 grads['kappa:0'] = tf.reduce_sum(tf.multiply(dy_tiled,dk_dkappa*tf.math.exp(positive().forward_log_det_jacobian(self.kappa_unconstrained,0))),0)
-                dy_tiled = tf.tile(tf.expand_dims(dy,1),(1,self.alphabet_size*self.rank))
                 gradient = [grads[v.name] for v in variables]
             else:
                 gradient = [None for v in variables]

@@ -311,7 +311,16 @@ class Batch_OCSSK(Kernel):
             dKp_dgap = dKp_dgap.write(i+1,dKp_dgap_temp_1 + dKp_dgap_temp_2)
 
 
- 
+            dKp_dmatch_temp_1 = 2*tf.divide(Kp_temp2,self.match_decay)
+            dKp_dmatch_temp_2 =  tf.multiply(S, dKp_dmatch.read(i))
+            dKp_dmatch_temp_2 = dKp_dmatch_temp_2 * match_sq
+            dKp_dmatch_temp_2 = tf.matmul(dKp_dmatch_temp_2,self.D)
+            dKp_dmatch_temp_2 = tf.matmul(self.D,dKp_dmatch_temp_2,transpose_a=True)        
+            dKp_dmatch = dKp_dmatch.write(i+1,dKp_dmatch_temp_1 + dKp_dmatch_temp_2)
+
+
+
+
 
         # Final calculation. We gather all Kps 
         Kp_stacked = Kp.stack()
