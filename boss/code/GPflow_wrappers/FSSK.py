@@ -186,7 +186,6 @@ class FSSK(Kernel):
 
             k = k[0:X1_shape*X2_shape]
             k_results = tf.reshape(k,[X1_shape,X2_shape])
-            print(k_results)
             # normalise
             norm = tf.tensordot(X_diag_Ks, X2_diag_Ks,axes=0)
             k_results = tf.divide(k_results, tf.sqrt(norm))
