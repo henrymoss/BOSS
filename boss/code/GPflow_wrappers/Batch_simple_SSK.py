@@ -17,8 +17,8 @@ class Batch_simple_SSK(Kernel):
                  alphabet = [], maxlen=0, batch_size=100):
         super().__init__(active_dims=active_dims)
         # constrain decay kernel params to between 0 and 1
-        self.logistic_decay = tfb.Chain([tfb.Shift(tf.cast(0,tf.float64))(tfb.Scale(tf.cast(1,tf.float64))),tfb.Sigmoid()])
-        self.decay_param= Parameter(decay, transform=self.logistic_decay ,name="decay")
+        self.logistic = tfb.Chain([tfb.Shift(tf.cast(0,tf.float64))(tfb.Scale(tf.cast(1,tf.float64))),tfb.Sigmoid()])
+        self.decay_param= Parameter(decay, transform=self.logistic ,name="decay")
 
         # use will use copies of the kernel params to stop building expensive computation graph
         # we instead efficientely calculate gradients using dynamic programming
@@ -201,7 +201,7 @@ class Batch_simple_SSK(Kernel):
             # get gradients of unconstrained params
             grads= {}
             if self.symmetric:
-                grads['decay:0'] = tf.reduce_sum(tf.multiply(dy,dk_dgap*tf.math.exp(self.logistic_gap.forward_log_det_jacobian(self.gap_decay_unconstrained,0))))
+                grads['decay:0'] = tf.reduce_sum(tf.multiply(dy,dk_dgap*tf.math.exp(self.logistic.forward_log_det_jacobian(self.decay_unconstrained,0))))
                 gradient = [grads[v.name] for v in variables]
             else:
                 gradient = [None for v in variables]
@@ -250,13 +250,11 @@ class Batch_simple_SSK(Kernel):
         # calc subkernels for each subsequence length (See Moss et al. 2020 for notation)
         Kp = tf.TensorArray(tf.float64,size=self.max_subsequence_length,clear_after_read=False)
         dKp_dgap = tf.TensorArray(tf.float64, size=self.max_subsequence_length, clear_after_read=False)
-        dKp_dmatch = tf.TensorArray(tf.float64, size=self.max_subsequence_length, clear_after_read=False)
 
         # fill in first entries
         Kp = Kp.write(0, tf.ones(shape=tf.stack([tf.shape(S)[0], self.maxlen,self.maxlen]), dtype=tf.float64))
         dKp_dgap = dKp_dgap.write(0, tf.zeros(shape=tf.stack([tf.shape(S)[0], self.maxlen,self.maxlen]), dtype=tf.float64))
-        dKp_dmatch = dKp_dmatch.write(0, tf.zeros(shape=tf.stack([tf.shape(S)[0], self.maxlen,self.maxlen]), dtype=tf.float64))
-     
+
         # calculate dynamic programs
         for i in tf.range(self.max_subsequence_length-1):
             Kp_temp = tf.multiply(S, Kp.read(i))
@@ -297,7 +295,6 @@ class Batch_simple_SSK(Kernel):
         temp = tf.reduce_sum(temp, -1)
         temp = temp * match_sq
         dk_dgap = tf.linalg.matvec(tf.transpose(temp),self.order_coefs)
-
 
 
         return k, dk_dgap
