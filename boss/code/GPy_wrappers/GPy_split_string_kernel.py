@@ -22,13 +22,11 @@ class SplitStringKernel(Kern):
 	We calculate gradients w.r.t kernel hyperparameters following Beck (2017)
 
 	We recommend normalize = True to allow meaningful comparrison of strings of different length
-	On CPU set implementation = "numba"
-	Also can use just "numpy" (5x slower than numba)
 	X is a numpy array of size (n,1) where each element is a string with characters seperated by spaces
 	"""
 
 	def __init__(self,gap_decay=1.0, match_decay=2.0, order_coefs=[1.0],
-		alphabet = [], maxlen=0, num_splits=1,normalize = True, implementation = "numpy"):
+		alphabet = [], maxlen=0, num_splits=1,normalize = True):
 		super(SplitStringKernel, self).__init__(1,None, "sk")
 		self._name = "sk"
 		self.num_splits = num_splits
@@ -40,7 +38,6 @@ class SplitStringKernel(Kern):
 		self.alphabet = alphabet
 		self.maxlen = maxlen
 		self.normalize = normalize
-		self.implementation = implementation
 
 		# make new kernels for each section
 		self.kernels = []

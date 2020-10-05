@@ -4,7 +4,7 @@ import numpy as np
 import sys
 from paramz.transformations import Logexp
 from ..kernels.string.np_string_kernel import NPStringKernel
-from ..kernels.string.tf_string_kernel import TFStringKernel
+
 
 
 class StringKernel(Kern):
@@ -20,17 +20,13 @@ class StringKernel(Kern):
           n-gram weights to help tune the signal coming from different sub-sequence lengths
     We calculate gradients w.r.t kernel hyperparameters following Beck (2017)
     This is mainly a wrapper for a numpy or numba implementation stored on the "kernel" attribute.
-†
+
     We recommend normalize = True to allow meaningful comparrison of strings of different length
-    
-    On CPU set implementation = "numpy'
-    
-    on GPU set implementation = "tensorflow" 
 
     X is a numpy array of size (n,1) where each element is a string with characters seperated by spaces
     """
     def __init__(self, gap_decay=1.0, match_decay=2.0, order_coefs=[1.0],
-                 alphabet = [], maxlen=0, active_dims=None, normalize = True, implementation = "numpy",batch_size=1000):
+                 alphabet = [], maxlen=0, active_dims=None, normalize = True,batch_size=1000):
         super(StringKernel, self).__init__(1, active_dims, 'sk')
         self._name = "sk"
         self.gap_decay = Param('Gap_decay', gap_decay,Logexp())
@@ -42,16 +38,10 @@ class StringKernel(Kern):
         self.maxlen = maxlen
         self.normalize = normalize
 
-        if implementation=="numpy":
-            self.kernel = NPStringKernel(_gap_decay=gap_decay, _match_decay=match_decay,
+        self.kernel = NPStringKernel(_gap_decay=gap_decay, _match_decay=match_decay,
                                      _order_coefs=list(order_coefs), alphabet = self.alphabet, 
                                      maxlen=maxlen,normalize=normalize)
-        elif implementation=="tensorflow":
-            self.kernel = TFStringKernel(_gap_decay=gap_decay, _match_decay=match_decay,
-                                     _order_coefs=list(order_coefs), alphabet = self.alphabet, 
-                                     maxlen=maxlen,normalize=normalize,batch_size=batch_size)
-        else:
-            raise ValueError("Need to choose either numpy or tensorflow for implementation")
+
     def K(self, X, X2):
         # calc the kernel for input X
         # also calc the gradients w.r.t kernel parameters
