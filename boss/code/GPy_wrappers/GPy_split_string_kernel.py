@@ -43,10 +43,10 @@ class SplitStringKernel(Kern):
 		self.kernels = []
 		for i in range(0,num_splits-1):
 			self.kernels.append(StringKernel(gap_decay=gap_decay,match_decay=match_decay, order_coefs=order_coefs,
-				 alphabet = alphabet, maxlen=int((self.maxlen/self.num_splits)),normalize=normalize,implementation=implementation))
+				 alphabet = alphabet, maxlen=int((self.maxlen/self.num_splits)),normalize=normalize))
 		# final kernel might be operating on slightly loinger string if maxlen/num_splits % !=0
 		self.kernels.append(StringKernel(gap_decay=gap_decay,match_decay=match_decay, order_coefs=order_coefs,
-			 alphabet = alphabet, maxlen=int((self.maxlen/self.num_splits)) + self.maxlen - self.num_splits*int((self.maxlen/self.num_splits)),normalize=normalize,implementation=implementation))
+			 alphabet = alphabet, maxlen=int((self.maxlen/self.num_splits)) + self.maxlen - self.num_splits*int((self.maxlen/self.num_splits)),normalize=normalize))
 		#tie the params across the kernels 
 		for kern in self.kernels:
 			kern.unlink_parameter(kern.gap_decay)
