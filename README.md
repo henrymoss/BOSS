@@ -2,7 +2,7 @@
 This is a package for performing Bayesian Optimization over String Spaces (BOSS). It accompanies https://arxiv.org/pdf/2010.00979.pdf and provides notebooks to recreate all the experiments.
 
 
-The code is built upon the emukit Bayesian optimziation library. We recommend following their tutorials to get started (https://github.com/amzn/emukit/tree/master/notebooks)
+The code is built upon the emukit Bayesian optimization library. We recommend following their tutorials to get started (https://github.com/amzn/emukit/tree/master/notebooks)
 
 
 We currently support the following spaces:
@@ -21,12 +21,4 @@ and provide implementations for the following surrogate models:
 5) Random search
 
 
-Genetic algorithm acqusiiton function optimzies are provided for each space type (except the space of a candidate set of strings).
-
-
-This package will be continually developed, with soon-to-be-added features including:
-
-1) Implementations of SSK for GPUs
-2) New scalable versions of SSKs for very long sequences (like genes>10^4)
-3) Support for tree and graph kernels, to measure  similarity between other discrete structures
-
+We also provide GPU support for string kernel GPs through GPflow. For an example see 
