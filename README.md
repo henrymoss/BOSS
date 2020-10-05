@@ -22,3 +22,4 @@ and provide implementations for the following surrogate models:
 
 
 We also provide GPU support for string kernel GPs through GPflow. For an example see 
+[![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/henrymoss/BOSS/blob/master/example_notebooks/Molecule_prediction_demo.ipynb)
