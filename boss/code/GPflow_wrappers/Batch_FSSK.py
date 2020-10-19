@@ -25,6 +25,7 @@ class Batch_FSSK(Kernel):
         # constrain decay kernel params to between 0 and 1
         self.logistic_gap = tfb.Chain([tfb.Shift(tf.cast(0,tf.float64))(tfb.Scale(tf.cast(1,tf.float64))),tfb.Sigmoid()])
         self.logisitc_match = tfb.Chain([tfb.AffineScalar(shift=tf.cast(0,tf.float64),scale=tf.cast(1,tf.float64)),tfb.Sigmoid()])
+        
         self.gap_decay_param= Parameter(gap_decay, transform=self.logistic_gap ,name="gap_decay")
         self.match_decay_param = Parameter(match_decay, transform=self.logisitc_match,name="match_decay")
         self.order_coefs_param =  Parameter(tf.ones(max_subsequence_length,dtype=tf.float64), transform=positive(),name="order_coefs")
@@ -123,7 +124,7 @@ class Batch_FSSK(Kernel):
 
         # make similarity matrix
         self.sim = tf.linalg.matmul(self.W, self.W, transpose_b=True) + tf.linalg.diag(self.kappa)
-        #self.sim = self.sim/tf.math.maximum(tf.reduce_max(self.sim),1)
+        self.sim = self.sim/tf.math.maximum(tf.reduce_max(self.sim),1)
         
 
 

@@ -34,7 +34,6 @@ class FSSK(Kernel):
         self.rank=rank
         W = 0.1 * tf.ones((len(alphabet), self.rank))
         kappa = 0.99*tf.ones(len(alphabet))
-        weights = 0.99*tf.ones(len(alphabet))
         self.W = Parameter(W,name="W")
         self.kappa = Parameter(kappa, transform=positive(),name="kappa")
   
@@ -123,7 +122,6 @@ class FSSK(Kernel):
         # make similarity matrix
         self.sim = tf.linalg.matmul(self.W, self.W, transpose_b=True) + tf.linalg.diag(self.kappa)
         self.sim = self.sim/tf.math.maximum(tf.reduce_max(self.sim),1)
-        #self.sim = self.sim/self.sim[0][0]
 
 
 

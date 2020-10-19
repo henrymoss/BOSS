@@ -1,7 +1,6 @@
 emukit>=0.4.7
 PyDOE>=0.3.8
 GPy>=1.9.9
-numba>=0.49.1
 numpy>=1.18.5
 matplotlib>=3.2.1
 nltk>=3.5
