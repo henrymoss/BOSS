@@ -98,9 +98,6 @@ class FSSK(Kernel):
         X1 = X1[:,:,1:]
         X2 = X2[:,:,1:]
 
-  
-
-
 
         # get indicies of all possible pairings from X and X2
         # this way allows maximum number of kernel calcs to be squished onto the GPU (rather than just doing individual rows of gram)
@@ -126,38 +123,43 @@ class FSSK(Kernel):
 
 
         # Make S: the similarity tensor of shape (# strings, #characters, # characters)
-
         S = tf.matmul( tf.matmul(X1_full,self.sim),tf.transpose(X2_full,perm=(0,2,1)))
-
-
-
 
         # store squared match coef
         match_sq = tf.square(self.match_decay)
 
-        # calc subkernels for each subsequence length
-        Kp = tf.TensorArray(tf.float64, size=0, dynamic_size=True,clear_after_read=False)
-        Kp = Kp.write(Kp.size(), tf.ones(shape=tf.stack([tf.shape(X1_full)[0], self.maxlen,self.maxlen]), dtype=tf.float64))
+
+        # initialize final kernel results
+        k = tf.zeros((tf.shape(S)[0]),dtype=tf.float64)
+        # initialize Kp for dynamic programming
+        Kp = tf.ones(shape=tf.stack([tf.shape(S)[0], self.maxlen,self.maxlen]), dtype=tf.float64)
         
+        # need to do 1st step
+        Kp_temp = tf.multiply(S, Kp)
+        Kp_temp = tf.reduce_sum(Kp_temp, -1)
+        Kp_temp = tf.reduce_sum(Kp_temp, -1)
+        Kp_temp = Kp_temp * match_sq
+        # add to kernel result
+        k = Kp_temp * self.order_coefs[0]
+
+
+        # do all remaining steps
         for i in tf.range(self.max_subsequence_length-1):
-            Kp_temp = tf.multiply(S, Kp.read(i))
-            Kp_temp0 =  match_sq * Kp_temp
-            Kp_temp1 = tf.matmul(Kp_temp0,self.D)
-            Kp_temp2 = tf.matmul(self.D,Kp_temp1,transpose_a=True)
-            Kp = Kp.write(Kp.size(),Kp_temp2)
-        Kp_stacked = Kp.stack()
-        Kp.close()
-        
-        # combine and get overall kernel
-        aux = tf.multiply(S, Kp_stacked)
-        aux = tf.reduce_sum(aux, -1)
-        sum2 = tf.reduce_sum(aux, -1)
-        Ki = sum2 * match_sq
-        #k = tf.reduce_sum(Ki,0)
-        k = tf.linalg.matvec(tf.transpose(Ki),self.order_coefs)
+            Kp_temp = tf.multiply(S, Kp)
+            Kp_temp =  match_sq * Kp_temp
+            Kp_temp = tf.matmul(Kp_temp,self.D)
+            # save part required for next dynamic programming step
+            Kp = tf.matmul(self.D,Kp_temp,transpose_a=True)
+            Kp_temp = tf.multiply(S, Kp)
+            Kp_temp = tf.reduce_sum(Kp_temp, -1)
+            Kp_temp = tf.reduce_sum(Kp_temp, -1)
+            Kp_temp = Kp_temp * match_sq
+            # add to kernel result
+            k += Kp_temp * self.order_coefs[i-1]
+
         k = tf.expand_dims(k,1)
 
-        # put results into the right places in the gram matrix and normalize
+        #put results into the right places in the gram matrix and normalize
         if self.symmetric:
             # if symmetric then only put in top triangle (inc diag)
             mask = tf.linalg.band_part(tf.ones((X1_shape,X2_shape),dtype=tf.int64), 0, -1)
