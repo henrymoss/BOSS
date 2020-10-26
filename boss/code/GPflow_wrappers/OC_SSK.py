@@ -6,7 +6,7 @@ from tensorflow_probability import bijectors as tfb
 import tensorflow_probability as tfp
 import numpy as np
 
-class SSK(Kernel):
+class OC_SSK(Kernel):
     """
     Code to run an SSK with gpflow
     
