@@ -30,7 +30,11 @@ class OC_SSK(Kernel):
         self.gap_decay= Parameter(gap_decay, transform=logistic_gap ,name="gap_decay")
         self.match_decay = Parameter(match_decay, transform=logisitc_match,name="match_decay")
 
-      
+        # prepare order coefs params
+        order_coefs=tf.ones(max_subsequence_length)
+        self.order_coefs =  Parameter(order_coefs, transform=positive(),name="order_coefs")  
+    
+    
         # store additional kernel parameters
         self.max_subsequence_length = tf.constant(max_subsequence_length)
         self.alphabet =  tf.constant(alphabet)
