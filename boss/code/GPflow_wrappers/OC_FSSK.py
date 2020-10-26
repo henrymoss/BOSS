@@ -6,7 +6,7 @@ from tensorflow_probability import bijectors as tfb
 import tensorflow_probability as tfp
 import numpy as np
 
-class FSSK(Kernel):
+class OC_FSSK(Kernel):
     """
     Code to run a soft-matched SSK with gpflow
     
@@ -33,13 +33,17 @@ class FSSK(Kernel):
         # prepare similarity matrix parameters
         self.rank=rank
         W = 0.1 * tf.ones((len(alphabet), self.rank))
-        kappa = tf.ones(len(alphabet))
+        kappa = 0.99*tf.ones(len(alphabet))
         if positive_sim:
             self.W = Parameter(W,transform=positive(),name="W")
         else:
             self.W = Parameter(W,name="W")
         self.kappa = Parameter(kappa, transform=positive(),name="kappa")
   
+        # prepare order coefs params
+        order_coefs=tf.ones(max_subsequence_length)
+        self.order_coefs =  Parameter(order_coefs, transform=positive(),name="order_coefs")
+
         # store additional kernel parameters
         self.max_subsequence_length = tf.constant(max_subsequence_length)
         self.alphabet =  tf.constant(alphabet)
@@ -128,22 +132,35 @@ class FSSK(Kernel):
         match_sq = tf.square(self.match_decay)
 
 
+        # initialize final kernel results
+        k = tf.zeros((tf.shape(S)[0]),dtype=tf.float64)
         # initialize Kp for dynamic programming
         Kp = tf.ones(shape=tf.stack([tf.shape(S)[0], self.maxlen,self.maxlen]), dtype=tf.float64)
         
+        # need to do 1st step
+        Kp_temp = tf.multiply(S, Kp)
+        Kp_temp = tf.reduce_sum(Kp_temp, -1)
+        Kp_temp = tf.reduce_sum(Kp_temp, -1)
+        Kp_temp = Kp_temp * match_sq
+        # add to kernel result
+        k = Kp_temp * self.order_coefs[0]
+
+
         # do all remaining steps
         for i in tf.range(self.max_subsequence_length-1):
-            Kp = tf.multiply(S, Kp)
-            Kp =  match_sq * Kp
-            Kp = tf.matmul(Kp,self.D)
-            Kp = tf.matmul(self.D,Kp,transpose_a=True)
+            Kp_temp = tf.multiply(S, Kp)
+            Kp_temp =  match_sq * Kp_temp
+            Kp_temp = tf.matmul(Kp_temp,self.D)
+            # save part required for next dynamic programming step
+            Kp = tf.matmul(self.D,Kp_temp,transpose_a=True)
+            Kp_temp = tf.multiply(S, Kp)
+            Kp_temp = tf.reduce_sum(Kp_temp, -1)
+            Kp_temp = tf.reduce_sum(Kp_temp, -1)
+            Kp_temp = Kp_temp * match_sq
+            # add to kernel result
+            k += Kp_temp * self.order_coefs[i+1]
 
-        # final kernel calc
-        Kp = tf.multiply(S, Kp)
-        Kp = tf.reduce_sum(Kp, -1)
-        Kp = tf.reduce_sum(Kp, -1)
-        Kp = Kp * match_sq
-        k = tf.expand_dims(Kp,1)
+        k = tf.expand_dims(k,1)
 
         #put results into the right places in the gram matrix and normalize
         if self.symmetric:

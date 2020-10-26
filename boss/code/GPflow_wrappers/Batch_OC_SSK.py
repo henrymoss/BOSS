@@ -4,7 +4,7 @@ from gpflow import Parameter
 import tensorflow as tf
 from tensorflow_probability import bijectors as tfb
 
-class Batch_SSK(Kernel):
+class Batch_OC_SSK(Kernel):
     """
     Code to run the SSK of Moss et al. 2020 with gpflow
     
@@ -34,6 +34,9 @@ class Batch_SSK(Kernel):
         self.match_decay_unconstrained = self.match_decay_param.unconstrained_variable.numpy()
         self.gap_decay_unconstrained = self.gap_decay_param.unconstrained_variable.numpy()
 
+
+        self.order_coefs=tf.ones(max_subsequence_length,dtype=tf.float64)
+        
         # store additional kernel parameters
         self.max_subsequence_length = tf.constant(max_subsequence_length)
         self.alphabet =  tf.constant(alphabet)
@@ -225,22 +228,35 @@ class Batch_SSK(Kernel):
         match_sq = tf.square(self.match_decay)
 
 
+        # initialize final kernel results
+        k = tf.zeros((tf.shape(S)[0]),dtype=tf.float64)
         # initialize Kp for dynamic programming
         Kp = tf.ones(shape=tf.stack([tf.shape(S)[0], self.maxlen,self.maxlen]), dtype=tf.float64)
         
+        # need to do 1st step
+        Kp_temp = tf.multiply(S, Kp)
+        Kp_temp = tf.reduce_sum(Kp_temp, -1)
+        Kp_temp = tf.reduce_sum(Kp_temp, -1)
+        Kp_temp = Kp_temp * match_sq
+        # add to kernel result
+        k = Kp_temp * self.order_coefs[0]
+
+
         # do all remaining steps
         for i in tf.range(self.max_subsequence_length-1):
-            Kp = tf.multiply(S, Kp)
-            Kp =  match_sq * Kp
-            Kp = tf.matmul(Kp,self.D)
-            Kp = tf.matmul(self.D,Kp,transpose_a=True)
+            Kp_temp = tf.multiply(S, Kp)
+            Kp_temp =  match_sq * Kp_temp
+            Kp_temp = tf.matmul(Kp_temp,self.D)
+            # save part required for next dynamic programming step
+            Kp = tf.matmul(self.D,Kp_temp,transpose_a=True)
+            Kp_temp = tf.multiply(S, Kp)
+            Kp_temp = tf.reduce_sum(Kp_temp, -1)
+            Kp_temp = tf.reduce_sum(Kp_temp, -1)
+            Kp_temp = Kp_temp * match_sq
+            # add to kernel result
+            k += Kp_temp * self.order_coefs[i+1]
 
-        # final kernel calc
-        Kp = tf.multiply(S, Kp)
-        Kp = tf.reduce_sum(Kp, -1)
-        Kp = tf.reduce_sum(Kp, -1)
-        Kp = Kp * match_sq
-        k = tf.expand_dims(Kp,1)
+        k = tf.expand_dims(k,1)
 
         return k
 
@@ -250,12 +266,34 @@ class Batch_SSK(Kernel):
         match_sq = tf.square(self.match_decay)
         gap_sq = tf.square(self.gap_decay)
         
+
         Kp = tf.ones(shape=tf.stack([tf.shape(S)[0], self.maxlen,self.maxlen]), dtype=tf.float64)
         dKp_dgap = tf.zeros(shape=tf.stack([tf.shape(S)[0], self.maxlen,self.maxlen]), dtype=tf.float64)
         dKp_dmatch = tf.zeros(shape=tf.stack([tf.shape(S)[0], self.maxlen,self.maxlen]), dtype=tf.float64)
   
+
+        # need to do 1st step
+
+        Kp_temp = tf.multiply(S, Kp)
+        Kp_temp = tf.reduce_sum(Kp_temp, -1)
+        Kp_temp = tf.reduce_sum(Kp_temp, -1)
+        k = tf.expand_dims(Kp_temp * match_sq,1) * self.order_coefs[0]
+
+        dKp_dgap_temp = tf.multiply(S, dKp_dgap)
+        dKp_dgap_temp = tf.reduce_sum(dKp_dgap_temp, -1)
+        dKp_dgap_temp = tf.reduce_sum(dKp_dgap_temp, -1)
+        dk_dgap = tf.expand_dims(dKp_dgap_temp * match_sq,1) * self.order_coefs[0]
+
+        dKp_dmatch_temp = tf.multiply(S, dKp_dmatch)
+        dKp_dmatch_temp = tf.reduce_sum(dKp_dmatch_temp, -1)
+        dKp_dmatch_temp = tf.reduce_sum(dKp_dmatch_temp, -1)
+        dKp_dmatch_temp = dKp_dmatch_temp * match_sq
+        dk_dmatch = tf.expand_dims(dKp_dmatch_temp + 2 * self.match_decay * Kp_temp,1) * self.order_coefs[0]
+
+
         # calculate dynamic programs
         for i in tf.range(self.max_subsequence_length-1):
+            # calculate bits for next steps of dynamic program
             Kp = tf.multiply(S, Kp)
             Kp_temp =  match_sq * Kp
             Kp = tf.matmul(Kp_temp,self.D)
@@ -272,27 +310,28 @@ class Batch_SSK(Kernel):
             dKp_dmatch = tf.matmul(self.D,dKp_dmatch,transpose_a=True)        
             dKp_dmatch = 2*tf.divide(Kp,self.match_decay) + dKp_dmatch
 
+            #calculate contribtuion from this subsqeuence length to the kernel
 
-        # final kernel calc
+            Kp_temp = tf.multiply(S, Kp)
+            Kp_temp = tf.reduce_sum(Kp_temp, -1)
+            Kp_temp = tf.reduce_sum(Kp_temp, -1)
+            k += tf.expand_dims(Kp_temp * match_sq,1) * self.order_coefs[i+1]
 
-        Kp = tf.multiply(S, Kp)
-        Kp = tf.reduce_sum(Kp, -1)
-        Kp = tf.reduce_sum(Kp, -1)
-        k = tf.expand_dims(Kp * match_sq,1)
+            dKp_dgap_temp = tf.multiply(S, dKp_dgap)
+            dKp_dgap_temp = tf.reduce_sum(dKp_dgap_temp, -1)
+            dKp_dgap_temp = tf.reduce_sum(dKp_dgap_temp, -1)
+            dk_dgap += tf.expand_dims(dKp_dgap_temp * match_sq,1) * self.order_coefs[i+1]
 
-        dKp_dgap = tf.multiply(S, dKp_dgap)
-        dKp_dgap = tf.reduce_sum(dKp_dgap, -1)
-        dKp_dgap = tf.reduce_sum(dKp_dgap, -1)
-        dk_dgap = tf.expand_dims(dKp_dgap * match_sq,1)
-
-        dKp_dmatch = tf.multiply(S, dKp_dmatch)
-        dKp_dmatch = tf.reduce_sum(dKp_dmatch, -1)
-        dKp_dmatch = tf.reduce_sum(dKp_dmatch, -1)
-        dKp_dmatch = dKp_dmatch * match_sq
-        dk_dmatch = tf.expand_dims(dKp_dmatch + 2 * self.match_decay * Kp,1)
+            dKp_dmatch_temp = tf.multiply(S, dKp_dmatch)
+            dKp_dmatch_temp = tf.reduce_sum(dKp_dmatch_temp, -1)
+            dKp_dmatch_temp = tf.reduce_sum(dKp_dmatch_temp, -1)
+            dKp_dmatch_temp = dKp_dmatch_temp * match_sq
+            dk_dmatch += tf.expand_dims(dKp_dmatch_temp + 2 * self.match_decay * Kp_temp,1) * self.order_coefs[i+1]
 
 
-       
+        k = tf.expand_dims(k,1)
+        dk_dgap = tf.expand_dims(dk_dgap,1)
+        dk_dmatch = tf.expand_dims(dk_dmatch,1)
 
         return k, dk_dgap, dk_dmatch
 

@@ -6,9 +6,9 @@ from tensorflow_probability import bijectors as tfb
 import tensorflow_probability as tfp
 import numpy as np
 
-class FSSK(Kernel):
+class SSK(Kernel):
     """
-    Code to run a soft-matched SSK with gpflow
+    Code to run an SSK with gpflow
     
    with hyperparameters:
     1) match_decay float
@@ -21,8 +21,8 @@ class FSSK(Kernel):
          rank of decomposition of similairty matrix (total free similarity parameters = alpahabet_size * (rank+1))
        """
 
-    def __init__(self,rank=1,active_dims=[0],gap_decay=0.1, match_decay=0.9,max_subsequence_length=3,
-                 alphabet = [], maxlen=0,positive_sim=True):
+    def __init__(self,active_dims=[0],gap_decay=0.1, match_decay=0.9,max_subsequence_length=3,
+                 alphabet = [], maxlen=0):
         super().__init__(active_dims=active_dims)
         # constrain decay kernel params to between 0 and 1
         logistic_gap = tfb.Chain([tfb.Shift(tf.cast(0,tf.float64))(tfb.Scale(tf.cast(1,tf.float64))),tfb.Sigmoid()])
@@ -30,16 +30,7 @@ class FSSK(Kernel):
         self.gap_decay= Parameter(gap_decay, transform=logistic_gap ,name="gap_decay")
         self.match_decay = Parameter(match_decay, transform=logisitc_match,name="match_decay")
 
-        # prepare similarity matrix parameters
-        self.rank=rank
-        W = 0.1 * tf.ones((len(alphabet), self.rank))
-        kappa = tf.ones(len(alphabet))
-        if positive_sim:
-            self.W = Parameter(W,transform=positive(),name="W")
-        else:
-            self.W = Parameter(W,name="W")
-        self.kappa = Parameter(kappa, transform=positive(),name="kappa")
-  
+      
         # store additional kernel parameters
         self.max_subsequence_length = tf.constant(max_subsequence_length)
         self.alphabet =  tf.constant(alphabet)
@@ -115,35 +106,43 @@ class FSSK(Kernel):
             X2_full = tf.concat([X2_full,X1,X2],0)
      
 
-        # make similarity matrix
-        self.sim = tf.linalg.matmul(self.W, self.W, transpose_b=True) + tf.linalg.diag(self.kappa)
-        self.sim = self.sim/tf.math.maximum(tf.reduce_max(self.sim),1)
-
-
-
         # Make S: the similarity tensor of shape (# strings, #characters, # characters)
-        S = tf.matmul( tf.matmul(X1_full,self.sim),tf.transpose(X2_full,perm=(0,2,1)))
+        S = tf.matmul(X1_full,tf.transpose(X2_full,perm=(0,2,1)))
 
         # store squared match coef
         match_sq = tf.square(self.match_decay)
 
 
+       
+        # initialize final kernel results
+        k = tf.zeros((tf.shape(S)[0]),dtype=tf.float64)
         # initialize Kp for dynamic programming
         Kp = tf.ones(shape=tf.stack([tf.shape(S)[0], self.maxlen,self.maxlen]), dtype=tf.float64)
         
+        # need to do 1st step
+        Kp_temp = tf.multiply(S, Kp)
+        Kp_temp = tf.reduce_sum(Kp_temp, -1)
+        Kp_temp = tf.reduce_sum(Kp_temp, -1)
+        Kp_temp = Kp_temp * match_sq
+        # add to kernel result
+        k = Kp_temp * self.order_coefs[0]
+
+
         # do all remaining steps
         for i in tf.range(self.max_subsequence_length-1):
-            Kp = tf.multiply(S, Kp)
-            Kp =  match_sq * Kp
-            Kp = tf.matmul(Kp,self.D)
-            Kp = tf.matmul(self.D,Kp,transpose_a=True)
+            Kp_temp = tf.multiply(S, Kp)
+            Kp_temp =  match_sq * Kp_temp
+            Kp_temp = tf.matmul(Kp_temp,self.D)
+            # save part required for next dynamic programming step
+            Kp = tf.matmul(self.D,Kp_temp,transpose_a=True)
+            Kp_temp = tf.multiply(S, Kp)
+            Kp_temp = tf.reduce_sum(Kp_temp, -1)
+            Kp_temp = tf.reduce_sum(Kp_temp, -1)
+            Kp_temp = Kp_temp * match_sq
+            # add to kernel result
+            k += Kp_temp * self.order_coefs[i+1]
 
-        # final kernel calc
-        Kp = tf.multiply(S, Kp)
-        Kp = tf.reduce_sum(Kp, -1)
-        Kp = tf.reduce_sum(Kp, -1)
-        Kp = Kp * match_sq
-        k = tf.expand_dims(Kp,1)
+        k = tf.expand_dims(k,1)
 
         #put results into the right places in the gram matrix and normalize
         if self.symmetric:

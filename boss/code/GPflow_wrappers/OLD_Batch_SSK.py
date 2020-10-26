@@ -4,7 +4,7 @@ from gpflow import Parameter
 import tensorflow as tf
 from tensorflow_probability import bijectors as tfb
 
-class Batch_SSK(Kernel):
+class OLD_Batch_SSK(Kernel):
     """
     Code to run the SSK of Moss et al. 2020 with gpflow
     
@@ -34,6 +34,9 @@ class Batch_SSK(Kernel):
         self.match_decay_unconstrained = self.match_decay_param.unconstrained_variable.numpy()
         self.gap_decay_unconstrained = self.gap_decay_param.unconstrained_variable.numpy()
 
+
+        self.order_coefs=tf.ones(max_subsequence_length,dtype=tf.float64)
+        
         # store additional kernel parameters
         self.max_subsequence_length = tf.constant(max_subsequence_length)
         self.alphabet =  tf.constant(alphabet)
@@ -225,22 +228,30 @@ class Batch_SSK(Kernel):
         match_sq = tf.square(self.match_decay)
 
 
-        # initialize Kp for dynamic programming
-        Kp = tf.ones(shape=tf.stack([tf.shape(S)[0], self.maxlen,self.maxlen]), dtype=tf.float64)
-        
-        # do all remaining steps
-        for i in tf.range(self.max_subsequence_length-1):
-            Kp = tf.multiply(S, Kp)
-            Kp =  match_sq * Kp
-            Kp = tf.matmul(Kp,self.D)
-            Kp = tf.matmul(self.D,Kp,transpose_a=True)
+        # calc subkernels for each subsequence length (See Moss et al. 2020 for notation)
+        Kp = tf.TensorArray(tf.float64,size=self.max_subsequence_length,clear_after_read=False)
 
-        # final kernel calc
-        Kp = tf.multiply(S, Kp)
-        Kp = tf.reduce_sum(Kp, -1)
-        Kp = tf.reduce_sum(Kp, -1)
-        Kp = Kp * match_sq
-        k = tf.expand_dims(Kp,1)
+        # fill in first entries
+        Kp = Kp.write(0, tf.ones(shape=tf.stack([tf.shape(S)[0], self.maxlen,self.maxlen]), dtype=tf.float64))
+
+        # calculate dynamic programs
+        for i in tf.range(self.max_subsequence_length-1):
+            Kp_temp = tf.multiply(S, Kp.read(i))
+            Kp_temp0 =  match_sq * Kp_temp
+            Kp_temp1 = tf.matmul(Kp_temp0,self.D)
+            Kp_temp2 = tf.matmul(self.D,Kp_temp1,transpose_a=True)
+            Kp = Kp.write(i+1,Kp_temp2)
+
+        # Final calculation. We gather all Kps 
+        Kp_stacked = Kp.stack()
+        Kp.close()
+
+        # combine and get overall kernel
+        aux = tf.multiply(S, Kp_stacked)
+        aux = tf.reduce_sum(aux, -1)
+        sum2 = tf.reduce_sum(aux, -1)
+        Ki = sum2 * match_sq
+        k = tf.linalg.matvec(tf.transpose(Ki),self.order_coefs)
 
         return k
 
@@ -249,50 +260,70 @@ class Batch_SSK(Kernel):
         # store squared match coef for easier calc later
         match_sq = tf.square(self.match_decay)
         gap_sq = tf.square(self.gap_decay)
-        
-        Kp = tf.ones(shape=tf.stack([tf.shape(S)[0], self.maxlen,self.maxlen]), dtype=tf.float64)
-        dKp_dgap = tf.zeros(shape=tf.stack([tf.shape(S)[0], self.maxlen,self.maxlen]), dtype=tf.float64)
-        dKp_dmatch = tf.zeros(shape=tf.stack([tf.shape(S)[0], self.maxlen,self.maxlen]), dtype=tf.float64)
-  
+        # calc subkernels for each subsequence length (See Moss et al. 2020 for notation)
+        Kp = tf.TensorArray(tf.float64,size=self.max_subsequence_length,clear_after_read=False)
+        dKp_dgap = tf.TensorArray(tf.float64, size=self.max_subsequence_length, clear_after_read=False)
+        dKp_dmatch = tf.TensorArray(tf.float64, size=self.max_subsequence_length, clear_after_read=False)
+
+        # fill in first entries
+        Kp = Kp.write(0, tf.ones(shape=tf.stack([tf.shape(S)[0], self.maxlen,self.maxlen]), dtype=tf.float64))
+        dKp_dgap = dKp_dgap.write(0, tf.zeros(shape=tf.stack([tf.shape(S)[0], self.maxlen,self.maxlen]), dtype=tf.float64))
+        dKp_dmatch = dKp_dmatch.write(0, tf.zeros(shape=tf.stack([tf.shape(S)[0], self.maxlen,self.maxlen]), dtype=tf.float64))
+     
         # calculate dynamic programs
         for i in tf.range(self.max_subsequence_length-1):
-            Kp = tf.multiply(S, Kp)
-            Kp_temp =  match_sq * Kp
-            Kp = tf.matmul(Kp_temp,self.D)
-            dKp_dgap =  tf.multiply(S, dKp_dgap)
-            dKp_dgap = dKp_dgap * match_sq
-            dKp_dgap = tf.matmul(dKp_dgap,self.D)
-            dKp_dgap = dKp_dgap + tf.matmul(Kp_temp,self.dD_dgap)
-            dKp_dgap = tf.matmul(self.D,dKp_dgap,transpose_a=True)
-            dKp_dgap = tf.matmul(self.dD_dgap,Kp,transpose_a=True) + dKp_dgap
-            Kp = tf.matmul(self.D,Kp,transpose_a=True)
-            dKp_dmatch =  tf.multiply(S, dKp_dmatch)
-            dKp_dmatch = dKp_dmatch * match_sq
-            dKp_dmatch = tf.matmul(dKp_dmatch,self.D)
-            dKp_dmatch = tf.matmul(self.D,dKp_dmatch,transpose_a=True)        
-            dKp_dmatch = 2*tf.divide(Kp,self.match_decay) + dKp_dmatch
+            Kp_temp = tf.multiply(S, Kp.read(i))
+            Kp_temp0 =  match_sq * Kp_temp
+            Kp_temp1 = tf.matmul(Kp_temp0,self.D)
+            Kp_temp2 = tf.matmul(self.D,Kp_temp1,transpose_a=True)
+            Kp = Kp.write(i+1,Kp_temp2)
 
+            dKp_dgap_temp_1 =  tf.matmul(self.dD_dgap,Kp_temp1,transpose_a=True)
+            dKp_dgap_temp_2 =  tf.multiply(S, dKp_dgap.read(i))
+            dKp_dgap_temp_2 = dKp_dgap_temp_2 * match_sq
+            dKp_dgap_temp_2 = tf.matmul(dKp_dgap_temp_2,self.D)
+            dKp_dgap_temp_2 = dKp_dgap_temp_2 + tf.matmul(Kp_temp0,self.dD_dgap)
+            dKp_dgap_temp_2 = tf.matmul(self.D,dKp_dgap_temp_2,transpose_a=True)
+            dKp_dgap = dKp_dgap.write(i+1,dKp_dgap_temp_1 + dKp_dgap_temp_2)
 
-        # final kernel calc
+            dKp_dmatch_temp_1 = 2*tf.divide(Kp_temp2,self.match_decay)
+            dKp_dmatch_temp_2 =  tf.multiply(S, dKp_dmatch.read(i))
+            dKp_dmatch_temp_2 = dKp_dmatch_temp_2 * match_sq
+            dKp_dmatch_temp_2 = tf.matmul(dKp_dmatch_temp_2,self.D)
+            dKp_dmatch_temp_2 = tf.matmul(self.D,dKp_dmatch_temp_2,transpose_a=True)        
+            dKp_dmatch = dKp_dmatch.write(i+1,dKp_dmatch_temp_1 + dKp_dmatch_temp_2)
 
-        Kp = tf.multiply(S, Kp)
-        Kp = tf.reduce_sum(Kp, -1)
-        Kp = tf.reduce_sum(Kp, -1)
-        k = tf.expand_dims(Kp * match_sq,1)
+        # Final calculation. We gather all Kps 
+        Kp_stacked = Kp.stack()
+        Kp.close()
+        dKp_dgap_stacked = dKp_dgap.stack()
+        dKp_dgap.close()
+        dKp_dmatch_stacked = dKp_dmatch.stack()
+        dKp_dmatch.close()
 
-        dKp_dgap = tf.multiply(S, dKp_dgap)
-        dKp_dgap = tf.reduce_sum(dKp_dgap, -1)
-        dKp_dgap = tf.reduce_sum(dKp_dgap, -1)
-        dk_dgap = tf.expand_dims(dKp_dgap * match_sq,1)
+        # combine and get overall kernel
 
-        dKp_dmatch = tf.multiply(S, dKp_dmatch)
-        dKp_dmatch = tf.reduce_sum(dKp_dmatch, -1)
-        dKp_dmatch = tf.reduce_sum(dKp_dmatch, -1)
-        dKp_dmatch = dKp_dmatch * match_sq
-        dk_dmatch = tf.expand_dims(dKp_dmatch + 2 * self.match_decay * Kp,1)
+        # get k
+        aux = tf.multiply(S, Kp_stacked)
+        aux = tf.reduce_sum(aux, -1)
+        sum2 = tf.reduce_sum(aux, -1)
+        Ki = sum2 * match_sq
+        k = tf.linalg.matvec(tf.transpose(Ki),self.order_coefs)
 
+        # get gap decay grads
+        temp = tf.multiply(S, dKp_dgap_stacked)
+        temp = tf.reduce_sum(temp, -1)
+        temp = tf.reduce_sum(temp, -1)
+        temp = temp * match_sq
+        dk_dgap = tf.linalg.matvec(tf.transpose(temp),self.order_coefs)
 
-       
+        # get match decay grads
+        temp = tf.multiply(S, dKp_dmatch_stacked)
+        temp = tf.reduce_sum(temp, -1)
+        temp = tf.reduce_sum(temp, -1)
+        temp = temp * match_sq
+        temp = temp + 2 * self.match_decay * sum2
+        dk_dmatch = tf.linalg.matvec(tf.transpose(temp),self.order_coefs)
+
 
         return k, dk_dgap, dk_dmatch
-
