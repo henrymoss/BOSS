@@ -22,7 +22,7 @@ class OC_FSSK(Kernel):
        """
 
     def __init__(self,rank=1,active_dims=[0],gap_decay=0.1, match_decay=0.9,max_subsequence_length=3,
-                 alphabet = [], maxlen=0,positive_sim=True):
+                 alphabet = [], maxlen=0):
         super().__init__(active_dims=active_dims)
         # constrain decay kernel params to between 0 and 1
         logistic_gap = tfb.Chain([tfb.Shift(tf.cast(0,tf.float64))(tfb.Scale(tf.cast(1,tf.float64))),tfb.Sigmoid()])
@@ -34,10 +34,7 @@ class OC_FSSK(Kernel):
         self.rank=rank
         W = 0.1 * tf.ones((len(alphabet), self.rank))
         kappa = 0.99*tf.ones(len(alphabet))
-        if positive_sim:
-            self.W = Parameter(W,transform=positive(),name="W")
-        else:
-            self.W = Parameter(W,name="W")
+        self.W = Parameter(W,name="W")
         self.kappa = Parameter(kappa, transform=positive(),name="kappa")
   
         # prepare order coefs params

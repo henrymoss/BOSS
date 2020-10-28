@@ -20,7 +20,7 @@ class Batch_FSSK(Kernel):
     """
 
     def __init__(self,rank=1,active_dims=[0],gap_decay=0.1, match_decay=0.9,max_subsequence_length=3,
-                 alphabet = [], maxlen=0, batch_size=100,positive_sim=True):
+                 alphabet = [], maxlen=0, batch_size=100):
         super().__init__(active_dims=active_dims)
         # constrain decay kernel params to between 0 and 1
         self.logistic_gap = tfb.Chain([tfb.Shift(tf.cast(0,tf.float64))(tfb.Scale(tf.cast(1,tf.float64))),tfb.Sigmoid()])
@@ -28,12 +28,8 @@ class Batch_FSSK(Kernel):
         
         self.gap_decay_param= Parameter(gap_decay, transform=self.logistic_gap ,name="gap_decay")
         self.match_decay_param = Parameter(match_decay, transform=self.logisitc_match,name="match_decay")
-        self.positive_sim = positive_sim
 
-        if self.positive_sim:
-            self.W_param = Parameter(0.1 * tf.ones((len(alphabet), rank)),transform=positive(),name="W")
-        else:
-            self.W_param = Parameter(0.1 * tf.ones((len(alphabet), rank)),name="W")
+        self.W_param = Parameter(0.1 * tf.ones((len(alphabet), rank)),name="W")
         
         self.kappa_param = Parameter(tf.ones(len(alphabet)), transform=positive(),name="kappa")
 
@@ -241,10 +237,7 @@ class Batch_FSSK(Kernel):
                 dy_tiled = tf.tile(tf.expand_dims(dy,1),(1,self.alphabet_size))
                 grads['kappa:0'] = tf.reduce_sum(tf.multiply(dy_tiled,dk_dkappa*tf.math.exp(positive().forward_log_det_jacobian(self.kappa_unconstrained,0))),0)
                 dy_tiled = tf.tile(tf.expand_dims(dy,1),(1,self.alphabet_size*self.rank)) 
-                if self.positive_sim:
-                    grads_temp = tf.reduce_sum(tf.multiply(dy_tiled,dk_dW*tf.math.exp(positive().forward_log_det_jacobian(self.W_unconstrained,0))),0)
-                else:
-                    grads_temp = tf.reduce_sum(tf.multiply(dy_tiled,dk_dW),0)
+                grads_temp = tf.reduce_sum(tf.multiply(dy_tiled,dk_dW),0)
                 grads['W:0'] = tf.reshape(grads_temp,(-1,self.alphabet_size,self.rank))
                 gradient = [grads[v.name] for v in variables]
             else:
