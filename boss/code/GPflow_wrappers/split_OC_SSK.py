@@ -65,12 +65,14 @@ class split_OC_SSK(Kernel):
 
     def K(self,X1,X2=None):
         # get each split kernel calc
-        
+
+        X1 = splitter(X1,self.m)
         if X2 is None:
             k_final = tf.zeros((tf.shape(X1[0])[0],tf.shape(X1[0])[0]),dtype=tf.float64)
             for i in range(self.m):
                 k_final += self.indiv_K(X1[i], None) * self.split_weights[i]
         else:
+            X2 = splitter(X2,self.m)
             k_final = tf.zeros((tf.shape(X1[0])[0],tf.shape(X2[0])[0]))
             for i in range(self.m):
                 k_final += self.indiv_K(X1[i], X2[i]) * self.split_weights[i] 
@@ -208,6 +210,7 @@ class split_OC_SSK(Kernel):
         return k_results
 
 
+
     def _precalc(self):
         r"""
         Precalc D matrix as required for kernel calcs
@@ -223,3 +226,21 @@ class split_OC_SSK(Kernel):
         power = tf.linalg.band_part(power, 0, -1) - tf.linalg.band_part(power, 0, 0) + tril
         tril = tf.transpose(tf.linalg.band_part(tf.ones((self.maxlen,self.maxlen),dtype=tf.float64), -1, 0))-tf.eye(self.maxlen,dtype=tf.float64)
         return tf.pow(self.gap_decay*tril, power)
+def splitter(X,n):
+    # split each input into n equal strings
+    split_string = X[0][0].split(" ")
+    length = len(split_string)
+    chunk_size = int(length/n)
+    split_data = []
+    for i in range(0,n):
+        split_data.append(np.zeros((X.shape[0],1),dtype=object))
+    for i in range(0,X.shape[0]):
+        split_string = X[i][0].split(" ")
+        for j in range(n-1):
+            section = split_string[j*chunk_size:(j+1)*chunk_size]
+            split_data[j][i]=" ".join(section)
+        # add all remaininh in last block
+        section = split_string[(n-1)*chunk_size:]
+        split_data[n-1][i]=" ".join(section)
+    return split_data
+
