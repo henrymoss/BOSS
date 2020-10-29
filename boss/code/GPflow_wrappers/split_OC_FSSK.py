@@ -21,7 +21,7 @@ class split_OC_FSSK(Kernel):
          rank of decomposition of similairty matrix (total free similarity parameters = alpahabet_size * (rank+1))
        """
 
-    def __init__(self,rank=1,active_dims=[0],gap_decay=0.1, match_decay=0.9,max_subsequence_length=3,
+    def __init__(self,m=1,rank=1,active_dims=[0],gap_decay=0.1, match_decay=0.9,max_subsequence_length=3,
                  alphabet = [], maxlen=0):
         super().__init__(active_dims=active_dims)
         # constrain decay kernel params to between 0 and 1
