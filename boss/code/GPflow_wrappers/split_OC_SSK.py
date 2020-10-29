@@ -36,7 +36,7 @@ class split_OC_SSK(Kernel):
         
         # get split weights
         self.m = m
-        split_weights=tf.ones(self.m)
+        split_weights=tf.ones(2 * self.m -1)
         self.split_weights =  Parameter(split_weights, transform=positive(),name="order_coefs")  
     
  
@@ -67,20 +67,32 @@ class split_OC_SSK(Kernel):
         # get each split kernel calc
         
         X1 = tf.strings.split(tf.squeeze(X1,1)).to_tensor("PAD",shape=[None,self.full_maxlen])
+        if self.m > 1 :
+            X1_overlap = X1[:,tf.cast(self.maxlen/self.m,dtype=tf.int32):tf.cast(-self.maxlen/self.m,dtype=tf.int32)+self.full_maxlen]
+
         X1_shape = tf.shape(X1)[0]
         X1 = tf.reshape(X1,(X1_shape,self.m,-1))
+        if self.m > 1 :
+            X1_overlap = tf.reshape(X1_overlap,(X1_shape,self.m-1,-1))
+            X1 = tf.concat([X1,X1_overlap],1)
 
         if X2 is None:
             k_final = tf.zeros((X1_shape,X1_shape),dtype=tf.float64)
-            for i in range(self.m):
+            tf.print(tf.shape(X1))
+            for i in range(2*self.m-1):
                 k_final += self.indiv_K(X1[:,i,:], None) * self.split_weights[i]
         else:
-            X2_shape = tf.shape(X2)[0]
             X2 = tf.strings.split(tf.squeeze(X2,1)).to_tensor("PAD",shape=[None,self.full_maxlen])
+            if self.m > 1 :
+                X2_overlap = X2[:,tf.cast(self.maxlen/self.m,dtype=tf.int32):tf.cast(-self.maxlen/self.m,dtype=tf.int32)+self.full_maxlen]
+            X2_shape = tf.shape(X2)[0]
             X2 = tf.reshape(X2,(X2_shape,self.m,-1))
+            if self.m > 1 :
+                X2_overlap = tf.reshape(X2_overlap,(X2_shape,self.m - 1,-1))
+                X2 = tf.concat([X2,X2_overlap],1)
 
             k_final = tf.zeros((X1_shape,X2_shape),dtype=tf.float64)
-            for i in range(self.m):
+            for i in range(2*self.m-1):
                 k_final += self.indiv_K(X1[:,i,:], X2[:,i,:]) * self.split_weights[i] 
 
 
@@ -232,5 +244,3 @@ class split_OC_SSK(Kernel):
         power = tf.linalg.band_part(power, 0, -1) - tf.linalg.band_part(power, 0, 0) + tril
         tril = tf.transpose(tf.linalg.band_part(tf.ones((self.maxlen,self.maxlen),dtype=tf.float64), -1, 0))-tf.eye(self.maxlen,dtype=tf.float64)
         return tf.pow(self.gap_decay*tril, power)
-
-
