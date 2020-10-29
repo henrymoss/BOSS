@@ -77,7 +77,7 @@ class split_OC_SSK(Kernel):
         else:
             X2_shape = tf.shape(X2)[0]
             X2 = tf.strings.split(tf.squeeze(X2,1)).to_tensor("PAD",shape=[None,self.full_maxlen])
-            X2 = tf.reshape(X1,(X2_shape,self.m,-1))
+            X2 = tf.reshape(X2,(X2_shape,self.m,-1))
 
             k_final = tf.zeros((X1_shape,X2_shape),dtype=tf.float64)
             for i in range(self.m):
