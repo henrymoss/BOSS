@@ -78,7 +78,6 @@ class split_OC_SSK(Kernel):
 
         if X2 is None:
             k_final = tf.zeros((X1_shape,X1_shape),dtype=tf.float64)
-            tf.print(tf.shape(X1))
             for i in range(2*self.m-1):
                 k_final += self.indiv_K(X1[:,i,:], None) * self.split_weights[i]
         else:
