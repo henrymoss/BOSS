@@ -79,7 +79,7 @@ class split_OC_SSK(Kernel):
             X2 = tf.strings.split(tf.squeeze(X2,1)).to_tensor("PAD",shape=[None,self.full_maxlen])
             X2 = tf.reshape(X1,(X2_shape,self.m,-1))
 
-            k_final = tf.zeros((X1_shape,X2_shape))
+            k_final = tf.zeros((X1_shape,X2_shape),dtype=tf.float64)
             for i in range(self.m):
                 k_final += self.indiv_K(X1[:,i,:], X2[:,i,:]) * self.split_weights[i] 
 
