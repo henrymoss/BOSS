@@ -6,7 +6,7 @@ from tensorflow_probability import bijectors as tfb
 import tensorflow_probability as tfp
 import numpy as np
 
-class OC_FSSK(Kernel):
+class split_OC_FSSK(Kernel):
     """
     Code to run a soft-matched SSK with gpflow
     
@@ -41,10 +41,17 @@ class OC_FSSK(Kernel):
         order_coefs=tf.ones(max_subsequence_length)
         self.order_coefs =  Parameter(order_coefs, transform=positive(),name="order_coefs")
 
+        # get split weights
+        self.m = m
+        split_weights=tf.ones(2 * self.m -1)
+        self.split_weights =  Parameter(split_weights, transform=positive(),name="order_coefs")  
+    
+
         # store additional kernel parameters
         self.max_subsequence_length = tf.constant(max_subsequence_length)
         self.alphabet =  tf.constant(alphabet)
-        self.alphabet_size=tf.shape(self.alphabet)[0]
+        self.maxlen =  tf.cast(tf.math.ceil(maxlen/self.m),dtype=tf.int32)
+        self.full_maxlen = tf.constant(maxlen)
         self.maxlen =  tf.constant(maxlen)
 
         # build a lookup table of the alphabet to encode input strings
